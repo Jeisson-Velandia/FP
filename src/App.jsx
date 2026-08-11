@@ -36,6 +36,19 @@ const STORAGE_KEY = "finanzas-personales-v1";
 
 /* ------------------------------- debt engine ------------------------------- */
 
+function applyDebtPayment(debts, debtId, amount) {
+  const updated = debts.map((d) =>
+    d.id === debtId ? { ...d, balance: Math.max(0, Number(d.balance) - Number(amount)) } : d
+  );
+  return updated.filter((d) => d.balance > 0.01);
+}
+
+function reverseDebtPayment(debts, debtId, amount) {
+  const exists = debts.some((d) => d.id === debtId);
+  if (!exists) return debts; // la deuda ya fue saldada y eliminada; no se puede restaurar automáticamente
+  return debts.map((d) => (d.id === debtId ? { ...d, balance: Number(d.balance) + Number(amount) } : d));
+}
+
 function simulateDebts(debts, extraPayment, strategy) {
   const working = debts.map((d) => ({ ...d }));
   if (working.length === 0) return { months: 0, totalInterest: 0, order: [] };
@@ -164,6 +177,7 @@ export default function FinanzasApp() {
     category: "comida",
     date: todayStr(),
     description: "",
+    debtId: "",
   });
   const [copyState, setCopyState] = useState("idle");
 
@@ -249,24 +263,56 @@ export default function FinanzasApp() {
 
   const submitTx = () => {
     if (!txForm.amount || !txForm.date) return;
+    const category = txForm.type === "ingreso" ? "ingreso" : txForm.category;
+    const isDebtPayment = txForm.type === "gasto" && category === "deuda" && txForm.debtId;
+    const debtId = isDebtPayment ? txForm.debtId : null;
+    const debtName = isDebtPayment ? state.debts.find((d) => d.id === debtId)?.name || "deuda" : "";
     const payload = {
       id: txForm.id || uid(),
       type: txForm.type,
       amount: Number(txForm.amount),
-      category: txForm.type === "ingreso" ? "ingreso" : txForm.category,
+      category,
       date: txForm.date,
-      description: txForm.description,
+      description: txForm.description || (isDebtPayment ? `Abono a ${debtName}` : ""),
+      debtId,
     };
-    setState((s) => {
-      if (txForm.id) {
-        return { ...s, transactions: s.transactions.map((t) => (t.id === txForm.id ? payload : t)) };
+
+    let debts = state.debts;
+    let transactions;
+
+    if (txForm.id) {
+      // Editing: first undo the debt effect of the previous version of this transaction
+      const prev = state.transactions.find((t) => t.id === txForm.id);
+      if (prev && prev.category === "deuda" && prev.debtId) {
+        debts = reverseDebtPayment(debts, prev.debtId, prev.amount);
       }
-      return { ...s, transactions: [payload, ...s.transactions] };
-    });
-    setTxForm({ id: null, type: "gasto", amount: "", category: "comida", date: todayStr(), description: "" });
+      transactions = state.transactions.map((t) => (t.id === txForm.id ? payload : t));
+    } else {
+      transactions = [payload, ...state.transactions];
+    }
+
+    if (payload.category === "deuda" && payload.debtId) {
+      const existedBefore = debts.some((d) => d.id === payload.debtId);
+      debts = applyDebtPayment(debts, payload.debtId, payload.amount);
+      const existsAfter = debts.some((d) => d.id === payload.debtId);
+      if (existedBefore && !existsAfter) {
+        setTimeout(() => alert(`¡Bien hecho! "${debtName}" quedó saldada y se eliminó automáticamente de tus deudas.`), 100);
+      }
+    }
+
+    setState((s) => ({ ...s, debts, transactions }));
+    setTxForm({ id: null, type: "gasto", amount: "", category: "comida", date: todayStr(), description: "", debtId: "" });
   };
-  const editTx = (t) => setTxForm({ ...t, type: t.type, category: t.category === "ingreso" ? "comida" : t.category });
-  const removeTx = (id) => setState((s) => ({ ...s, transactions: s.transactions.filter((t) => t.id !== id) }));
+  const editTx = (t) =>
+    setTxForm({ ...t, type: t.type, category: t.category === "ingreso" ? "comida" : t.category, debtId: t.debtId || "" });
+  const removeTx = (id) => {
+    const tx = state.transactions.find((t) => t.id === id);
+    let debts = state.debts;
+    if (tx && tx.category === "deuda" && tx.debtId) {
+      debts = reverseDebtPayment(debts, tx.debtId, tx.amount);
+    }
+    setState((s) => ({ ...s, debts, transactions: s.transactions.filter((t) => t.id !== id) }));
+  };
 
   const exportData = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
@@ -427,6 +473,7 @@ export default function FinanzasApp() {
               editTx={editTx}
               removeTx={removeTx}
               transactions={state.transactions}
+              debts={state.debts}
             />
           )}
 
@@ -697,7 +744,8 @@ function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, 
 
 /* ------------------------------ movimientos tab ------------------------------ */
 
-function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transactions }) {
+function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transactions, debts }) {
+  const selectedDebt = txForm.debtId ? debts.find((d) => d.id === txForm.debtId) : null;
   return (
     <div className="space-y-6">
       <div className="ledger-card p-5">
@@ -714,7 +762,7 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
           </Field>
           {txForm.type === "gasto" && (
             <Field label="Categoría">
-              <select value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value })}>
+              <select value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value, debtId: "" })}>
                 {CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
@@ -729,14 +777,39 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
           <Field label="Descripción">
             <input placeholder="Opcional" value={txForm.description} onChange={(e) => setTxForm({ ...txForm, description: e.target.value })} />
           </Field>
+          {txForm.type === "gasto" && txForm.category === "deuda" && (
+            <Field label="Deuda a abonar">
+              <select value={txForm.debtId || ""} onChange={(e) => setTxForm({ ...txForm, debtId: e.target.value })}>
+                <option value="">Selecciona una deuda</option>
+                {debts.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} · saldo {fmt(d.balance)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
+        {txForm.type === "gasto" && txForm.category === "deuda" && !txForm.debtId && (
+          <p className="text-xs mt-2" style={{ color: "var(--amber)" }}>
+            Si no eliges a qué deuda corresponde, el pago se registrará como gasto pero no descontará ningún saldo.
+          </p>
+        )}
+        {selectedDebt && Number(txForm.amount) > 0 && (
+          <p className="text-xs mt-2" style={{ color: "var(--ink-dim)" }}>
+            Saldo de "{selectedDebt.name}" después de este pago:{" "}
+            <span className="font-mono-num" style={{ color: "var(--green)" }}>
+              {fmt(Math.max(0, selectedDebt.balance - Number(txForm.amount)))}
+            </span>
+          </p>
+        )}
         <div className="flex gap-3 mt-4">
           <button onClick={submitTx} className="btn-brass rounded px-4 py-2 text-sm font-medium flex items-center gap-2">
             <PlusCircle size={15} /> {txForm.id ? "Guardar cambios" : "Añadir movimiento"}
           </button>
           {txForm.id && (
             <button
-              onClick={() => setTxForm({ id: null, type: "gasto", amount: "", category: "comida", date: todayStr(), description: "" })}
+              onClick={() => setTxForm({ id: null, type: "gasto", amount: "", category: "comida", date: todayStr(), description: "", debtId: "" })}
               className="btn-ghost rounded px-4 py-2 text-sm font-medium flex items-center gap-2"
             >
               <X size={15} /> Cancelar
