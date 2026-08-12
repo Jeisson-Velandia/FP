@@ -137,7 +137,7 @@ npm run preview
 
 <div align="center">
 
-Hecho por **Jeisson Velandia** · [Conéctate en LinkedIn]([https://www.linkedin.com/in/TU-USUARIO/](https://www.linkedin.com/in/jeisson-velandia-535298236/))
+Hecho por **Jeisson Velandia** · [Conéctate en LinkedIn](https://www.linkedin.com/in/jeisson-velandia-535298236/)
 
 Si te sirvió, una ⭐ en el repositorio ayuda a que más personas lo encuentren.
 
