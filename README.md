@@ -9,7 +9,7 @@
 [![Firebase](https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore-FFCA28?logo=firebase&logoColor=white)](https://firebase.google.com)
 [![Licencia MIT](https://img.shields.io/badge/Licencia-MIT-green)](#-licencia)
 
-**[🚀 Pruébala ahora — es gratis](https://TU-USUARIO.github.io/FP/)**
+**[🚀 Pruébala ahora — es gratis](https://jeisson-velandia.github.io/FP/)**
 
 </div>
 
@@ -137,7 +137,7 @@ npm run preview
 
 <div align="center">
 
-Hecho por **[Tu Nombre]** · [Conéctate en LinkedIn](https://www.linkedin.com/in/TU-USUARIO/)
+Hecho por **Jeisson Velandia** · [Conéctate en LinkedIn]([https://www.linkedin.com/in/TU-USUARIO/](https://www.linkedin.com/in/jeisson-velandia-535298236/))
 
 Si te sirvió, una ⭐ en el repositorio ayuda a que más personas lo encuentren.
 
