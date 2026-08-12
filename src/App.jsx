@@ -1,9 +1,14 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { signOut } from "firebase/auth";
+import { db, auth } from "./firebase";
+import { useAuth } from "./useAuth";
+import AuthScreen from "./AuthScreen.jsx";
 import {
   LayoutDashboard, Settings2, ListChecks, Mountain, Save, Home, Utensils,
   Car, Film, HeartPulse, MoreHorizontal, PlusCircle, Trash2, Pencil, X,
   Download, Upload, TrendingUp, TrendingDown, Wallet, AlertTriangle,
-  CheckCircle2, Snowflake, RotateCcw, Copy, Check, CreditCard,
+  CheckCircle2, Snowflake, RotateCcw, Copy, Check, CreditCard, LogOut, CloudOff,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -143,26 +148,56 @@ function BottomNavButton({ active, onClick, icon: Icon, label }) {
 
 /* ---------------------------------- app ------------------------------------ */
 
-export default function FinanzasApp() {
+function FinanzasApp({ user, onLogout }) {
   const [state, setState] = useState(() => {
+    // Carga instantánea desde la caché local (evita pantalla en blanco) mientras llega la nube
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? { ...emptyState, ...JSON.parse(saved) } : emptyState;
+      const cached = localStorage.getItem(STORAGE_KEY + "-" + user.uid);
+      return cached ? { ...emptyState, ...JSON.parse(cached) } : emptyState;
     } catch {
       return emptyState;
     }
   });
+  const [cloudReady, setCloudReady] = useState(false);
+  const [syncError, setSyncError] = useState("");
   const [tab, setTab] = useState("dashboard");
   const fileInputRef = useRef(null);
 
-  // Autosave to localStorage on every change
+  // Carga inicial desde Firestore (la nube manda una vez llega)
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "profiles", user.uid));
+        if (active && snap.exists()) {
+          setState({ ...emptyState, ...snap.data() });
+        }
+      } catch (e) {
+        if (active) setSyncError("No se pudo conectar con la nube. Tus cambios se están guardando solo en este dispositivo por ahora.");
+      } finally {
+        if (active) setCloudReady(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user.uid]);
+
+  // Autosave: caché local instantánea + sincronización a la nube (con pequeño debounce)
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY + "-" + user.uid, JSON.stringify(state));
     } catch {
-      /* storage unavailable, ignore */
+      /* almacenamiento local no disponible, ignorar */
     }
-  }, [state]);
+    if (!cloudReady) return; // evita sobrescribir la nube con el estado vacío antes de que llegue la primera carga
+    const timeout = setTimeout(() => {
+      setDoc(doc(db, "profiles", user.uid), state).catch(() => {
+        setSyncError("No se pudo guardar en la nube. Revisa tu conexión — tus datos siguen a salvo en este dispositivo.");
+      });
+    }, 600);
+    return () => clearTimeout(timeout);
+  }, [state, cloudReady, user.uid]);
 
   /* ---- setup forms ---- */
   const [incomeForm, setIncomeForm] = useState({ name: "", amount: "", frequency: "mensual" });
@@ -373,58 +408,39 @@ export default function FinanzasApp() {
 
   return (
     <div className="app-shell min-h-screen w-full flex flex-col">
-      <style>{`
-        :root {
-          --bg:#12181B; --surface:#1B2428; --surface2:#212C31; --ink:#ECE7DA; --ink-dim:#8FA09D;
-          --brass:#C9A227; --green:#4F9D69; --red:#B5533C; --amber:#D9A441; --rule: rgba(201,162,39,0.28);
-        }
-        .app-shell { background:var(--bg); color:var(--ink); font-family: -apple-system, "Segoe UI", Inter, sans-serif; }
-        .font-display { font-family: Georgia, "Times New Roman", serif; }
-        .font-mono-num { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
-        .ledger-card { background:var(--surface); border:1px solid var(--rule); border-radius:3px; }
-        .hairline { border-color: var(--rule) !important; }
-        .tab-btn { border-left: 2px solid transparent; }
-        .tab-btn.active { border-left-color: var(--brass); background: var(--surface2); }
-        .stamp { border: 3px double currentColor; border-radius: 999px; transform: rotate(-8deg); }
-        input, select, textarea {
-          background: var(--surface2); border:1px solid var(--rule); color: var(--ink);
-          border-radius: 3px; padding: 6px 8px; outline:none;
-        }
-        input:focus, select:focus, textarea:focus { border-color: var(--brass); }
-        ::placeholder { color: #5C6C69; }
-        .btn-brass { background: var(--brass); color: #12181B; }
-        .btn-brass:hover { background: #DBB439; }
-        .btn-ghost { background: transparent; border:1px solid var(--rule); color: var(--ink); }
-        .btn-ghost:hover { border-color: var(--brass); color: var(--brass); }
-        .progress-track { background: var(--surface2); }
-        table th, table td { border-color: var(--rule); }
-        ::-webkit-scrollbar { width: 8px; height:8px; }
-        ::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 4px; }
-        .bottom-nav {
-          background: var(--surface);
-          border-top: 1px solid var(--rule);
-          padding-bottom: env(safe-area-inset-bottom, 0px);
-        }
-      `}</style>
-
       {/* Masthead */}
-      <header className="flex items-center justify-between px-6 py-4 border-b hairline" style={{ borderBottomWidth: 1 }}>
-        <div className="flex items-center gap-3">
-          <Wallet size={22} style={{ color: "var(--brass)" }} />
-          <div>
+      <header className="flex items-center justify-between px-6 py-4 border-b hairline gap-3" style={{ borderBottomWidth: 1 }}>
+        <div className="flex items-center gap-3 min-w-0">
+          <Wallet size={22} style={{ color: "var(--brass)" }} className="shrink-0" />
+          <div className="min-w-0">
             <h1 className="font-display text-xl tracking-wide">Mi Libro Mayor</h1>
-            <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
-              Ledger personal · {new Date().toLocaleDateString("es-CO", { month: "long", year: "numeric" })}
+            <p className="text-xs truncate" style={{ color: "var(--ink-dim)" }}>
+              {syncError ? (
+                <span className="flex items-center gap-1" style={{ color: "var(--amber)" }}>
+                  <CloudOff size={11} /> {syncError}
+                </span>
+              ) : (
+                <>{user.email} · {new Date().toLocaleDateString("es-CO", { month: "long", year: "numeric" })}</>
+              )}
             </p>
           </div>
         </div>
-        <div className="text-right hidden sm:block">
-          <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
-            Balance del mes
-          </p>
-          <p className="font-mono-num text-lg font-semibold" style={{ color: balanceMes >= 0 ? "var(--green)" : "var(--red)" }}>
-            {fmt(balanceMes)}
-          </p>
+        <div className="flex items-center gap-4 shrink-0">
+          <div className="text-right hidden sm:block">
+            <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
+              Balance del mes
+            </p>
+            <p className="font-mono-num text-lg font-semibold" style={{ color: balanceMes >= 0 ? "var(--green)" : "var(--red)" }}>
+              {fmt(balanceMes)}
+            </p>
+          </div>
+          <button
+            onClick={() => signOut(auth)}
+            title="Cerrar sesión"
+            className="btn-ghost rounded p-2 flex items-center justify-center"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </header>
 
@@ -514,6 +530,28 @@ export default function FinanzasApp() {
       </nav>
     </div>
   );
+}
+
+/* ------------------------------- root wrapper ------------------------------- */
+
+export default function App() {
+  const user = useAuth();
+
+  if (user === undefined) {
+    return (
+      <div className="app-shell min-h-screen w-full flex items-center justify-center">
+        <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
+          Cargando...
+        </p>
+      </div>
+    );
+  }
+
+  if (user === null) {
+    return <AuthScreen />;
+  }
+
+  return <FinanzasApp user={user} />;
 }
 
 /* ------------------------------- dashboard tab ------------------------------ */
@@ -1002,11 +1040,11 @@ function DatosTab({ exportData, copyData, copyState, fileInputRef, importFile, p
   return (
     <div className="space-y-6">
       <div className="ledger-card p-5">
-        <h3 className="font-display text-base mb-2">Guardado automático</h3>
+        <h3 className="font-display text-base mb-2">Sincronización en la nube</h3>
         <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
-          Tus datos se guardan automáticamente en este dispositivo cada vez que haces un cambio. No necesitas exportar
-          nada para no perder información — pero sí es buena idea exportar de vez en cuando como respaldo, o si quieres
-          pasar tus datos a otro dispositivo.
+          Tus datos se guardan automáticamente en la nube, asociados a tu cuenta. Puedes iniciar sesión desde
+          cualquier dispositivo con el mismo correo y vas a ver la misma información. Aun así, exportar de vez en
+          cuando es una buena idea como respaldo adicional.
         </p>
       </div>
 
