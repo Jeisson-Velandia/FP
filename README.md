@@ -1,81 +1,144 @@
-# Mi Libro Mayor — Finanzas Personales
+<div align="center">
 
-App de finanzas personales (ingresos, gastos, presupuestos y estrategia de deudas), lista para
-publicar gratis en GitHub Pages y abrir desde el celular como si fuera una app.
+# 💰 Mi Libro Mayor
 
-- En escritorio, el menú aparece a la izquierda.
-- En celular, el menú aparece como una **barra fija abajo**, estilo app nativa.
-- Tus datos se guardan automáticamente en el navegador de tu celular (localStorage) — no se
-  pierden al cerrar la pestaña. También puedes exportarlos/importarlos como JSON desde la
-  pestaña "Datos".
+### Organiza tus finanzas personales, controla tus deudas y toma mejores decisiones con tu dinero.
 
-## 1. Sube este proyecto a GitHub
+[![Hecho con React](https://img.shields.io/badge/Hecho%20con-React-61DAFB?logo=react&logoColor=white)](https://react.dev)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind-CSS-38BDF8?logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![Firebase](https://img.shields.io/badge/Firebase-Auth%20%2B%20Firestore-FFCA28?logo=firebase&logoColor=white)](https://firebase.google.com)
+[![Licencia MIT](https://img.shields.io/badge/Licencia-MIT-green)](#-licencia)
 
-1. Crea un repositorio nuevo en GitHub (puede ser público o privado — GitHub Pages funciona
-   igual, aunque en cuentas gratuitas Pages para repos privados requiere GitHub Pro).
-2. Sube todos estos archivos a ese repositorio (arrastrándolos en la web de GitHub, o con git):
+**[🚀 Pruébala ahora — es gratis](https://TU-USUARIO.github.io/FP/)**
 
-   ```bash
-   git init
-   git add .
-   git commit -m "Primera versión de la app de finanzas"
-   git branch -M main
-   git remote add origin https://github.com/TU-USUARIO/NOMBRE-DEL-REPO.git
-   git push -u origin main
+</div>
+
+---
+
+## ¿Qué es esto?
+
+**Mi Libro Mayor** es una aplicación web gratuita para llevar el control de tus finanzas
+personales: cuánto ganas, cuánto gastas, cuánto debes y cómo salir de tus deudas más rápido —
+todo en un tablero simple, con tus datos guardados de forma privada en la nube y accesibles
+desde cualquier dispositivo.
+
+Crea tu cuenta con tu correo, y en menos de dos minutos tienes tu situación financiera
+organizada y bajo control.
+
+## ✨ Qué puedes hacer
+
+- 📊 **Tablero visual** con un semáforo de salud financiera (verde/amarillo/rojo) y gráficos de
+  presupuesto vs. gasto real por categoría.
+- 💵 **Registra ingresos y gastos** día a día, con categorías (vivienda, comida, transporte,
+  entretenimiento, salud, deuda y más).
+- 🎯 **Define presupuestos límite** por categoría y recibe una alerta visual cuando te estás
+  acercando o ya te pasaste.
+- 💳 **Controla tus deudas**: registra el saldo, la tasa de interés y el pago mínimo de cada una.
+- 🧠 **Estrategia de pago inteligente**: la app compara automáticamente los métodos *Bola de
+  Nieve* y *Avalancha*, y te recomienda cuál te conviene según tus números.
+- 🔗 **Pagos de deuda vinculados**: cuando registras un abono a una tarjeta o préstamo, se
+  descuenta solo del saldo correspondiente — y si la terminas de pagar, se marca como saldada
+  automáticamente.
+- ☁️ **Cuenta en la nube**: tus datos están asociados a tu perfil, no a un dispositivo. Inicia
+  sesión desde tu celular o tu computador y ves la misma información, siempre privada.
+- 📱 **Pensada para el celular**: en pantallas pequeñas el menú se convierte en una barra fija
+  abajo, como cualquier app nativa. Agrégala a tu pantalla de inicio y úsala como una app más.
+
+## 🔒 Privacidad
+
+Tus datos financieros son tuyos. Cada cuenta solo puede leer y escribir su propia información —
+nadie más puede ver tus ingresos, deudas o movimientos, ni siquiera con acceso a la base de
+datos. La app no vende, comparte ni analiza tus datos con terceros.
+
+## 🛠️ Hecha con
+
+React · Tailwind CSS · Recharts · Firebase (Authentication + Firestore) · Vite · GitHub Pages
+
+---
+
+<details>
+<summary><strong>🚀 ¿Quieres desplegar tu propia copia? (para desarrolladores)</strong></summary>
+
+Este proyecto es de código abierto. Si quieres correrlo tú mismo con tu propia base de datos,
+necesitas Node.js instalado y una cuenta gratuita de Firebase.
+
+### 0. Crea tu proyecto de Firebase (gratis)
+
+1. Ve a [console.firebase.google.com](https://console.firebase.google.com) y crea un proyecto
+   nuevo (puedes desactivar Google Analytics, no lo necesitas).
+2. **Authentication** → pestaña "Sign-in method" → habilita **Correo electrónico/contraseña**.
+3. **Firestore Database** → "Crear base de datos" → cualquier región cercana → modo de
+   producción.
+4. En Firestore, pestaña **Reglas**, reemplaza el contenido por esto y publica:
+
+   ```
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /profiles/{userId} {
+         allow read, write: if request.auth != null && request.auth.uid == userId;
+       }
+     }
+   }
    ```
 
-## 2. Ajusta el nombre del repositorio en la configuración
+   Esto garantiza que cada usuario solo pueda leer y escribir su propio documento.
 
-Abre `vite.config.js` y cambia esta línea:
+5. **Configuración del proyecto** (ícono de engranaje) → "Tus apps" → ícono `</>` (Web) →
+   regístrala → copia el objeto `firebaseConfig` que te muestra.
+6. Pega esos valores en `src/firebase.js`, reemplazando los de ejemplo.
+
+### 1. Sube el proyecto a GitHub
+
+```bash
+git init
+git add .
+git commit -m "Primera versión"
+git branch -M main
+git remote add origin https://github.com/TU-USUARIO/NOMBRE-DEL-REPO.git
+git push -u origin main
+```
+
+### 2. Ajusta el nombre del repositorio
+
+En `vite.config.js`, cambia:
 
 ```js
 base: "/NOMBRE-DEL-REPO/",
 ```
 
-por el nombre real de tu repositorio, por ejemplo:
+por el nombre real de tu repositorio.
 
-```js
-base: "/mis-finanzas/",
+### 3. Activa GitHub Pages
+
+En tu repositorio: **Settings → Pages → Source → GitHub Actions**. El workflow en
+`.github/workflows/deploy.yml` compila y publica la app automáticamente en cada `push` a `main`.
+Después del primer despliegue (1–2 min), tu app queda en:
+
+```
+https://TU-USUARIO.github.io/NOMBRE-DEL-REPO/
 ```
 
-Esto es necesario porque GitHub Pages publica tu app en una subcarpeta
-(`tuusuario.github.io/mis-finanzas/`), no en la raíz del dominio.
-
-## 3. Activa GitHub Pages
-
-1. En tu repositorio en GitHub, ve a **Settings → Pages**.
-2. En "Build and deployment", selecciona la fuente **GitHub Actions**.
-3. Cada vez que hagas `git push` a la rama `main`, el workflow en
-   `.github/workflows/deploy.yml` va a compilar y publicar la app automáticamente.
-4. Después del primer despliegue (tarda 1–2 minutos), tu app va a estar disponible en:
-
-   ```
-   https://TU-USUARIO.github.io/NOMBRE-DEL-REPO/
-   ```
-
-## 4. Ábrela desde el celular
-
-Abre esa URL en el navegador de tu celular (Chrome, Safari, etc.). Para que se sienta como una
-app real:
-
-- **Android (Chrome):** menú (⋮) → "Añadir a pantalla de inicio".
-- **iPhone (Safari):** botón de compartir → "Añadir a pantalla de inicio".
-
-Con eso queda un ícono en tu celular que abre la app en pantalla completa, sin la barra del
-navegador, con el menú fijo abajo.
-
-## Desarrollo local (opcional)
-
-Si quieres probar cambios antes de subirlos:
+### Desarrollo local
 
 ```bash
 npm install
 npm run dev
 ```
 
-Y para generar la versión de producción manualmente:
-
 ```bash
 npm run build
 npm run preview
 ```
+
+</details>
+
+---
+
+<div align="center">
+
+Hecho por **[Tu Nombre]** · [Conéctate en LinkedIn](https://www.linkedin.com/in/TU-USUARIO/)
+
+Si te sirvió, una ⭐ en el repositorio ayuda a que más personas lo encuentren.
+
+</div>
