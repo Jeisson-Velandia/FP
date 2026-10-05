@@ -10,6 +10,8 @@ import { fmt, todayStr, thisMonthKey, thisYear, thisMonthIndex } from "./lib/for
 import { buildMonthlySummaries } from "./lib/annualSummary.js";
 import AnnualSummary from "./components/AnnualSummary.jsx";
 import SavingsGoalsModule from "./components/SavingsGoals.jsx";
+import DebtManager from "./components/DebtManager.jsx";
+import { applyTxToDebts, reverseTxOnDebts, isCreditCharge } from "./lib/debts.js";
 import {
   LayoutDashboard, Settings2, ListChecks, Mountain, Save, Home, Utensils,
   Car, Film, HeartPulse, MoreHorizontal, PlusCircle, Trash2, Pencil, X,
@@ -43,23 +45,15 @@ const FREQ_LABEL = { mensual: "Mensual", quincenal: "Quincenal", semanal: "Seman
 const uid = () => Math.random().toString(36).slice(2, 10);
 // fmt, todayStr y thisMonthKey ahora viven en ./lib/format.js (ver imports arriba)
 
+const EMPTY_DEBT_FORM = { id: null, name: "", balance: "", rate: "", minPayment: "", kind: "prestamo", limit: "" };
+const EMPTY_TX_FORM = () => ({ id: null, type: "gasto", amount: "", category: "comida", date: todayStr(), description: "", debtId: "", chargeDebtId: "" });
+// Categorías en las que se puede consumir a crédito: un pago a deuda o un ahorro no se "cargan" a una tarjeta.
+const CHARGEABLE_CATEGORIES = CATEGORIES.filter((c) => c.id !== "deuda" && c.id !== "ahorro");
+
 const emptyState = { incomes: [], debts: [], budgets: {}, transactions: [], savingsGoals: { monthly: 0, annual: 0 } };
 const STORAGE_KEY = "finanzas-personales-v1";
 
 /* ------------------------------- debt engine ------------------------------- */
-
-function applyDebtPayment(debts, debtId, amount) {
-  const updated = debts.map((d) =>
-    d.id === debtId ? { ...d, balance: Math.max(0, Number(d.balance) - Number(amount)) } : d
-  );
-  return updated.filter((d) => d.balance > 0.01);
-}
-
-function reverseDebtPayment(debts, debtId, amount) {
-  const exists = debts.some((d) => d.id === debtId);
-  if (!exists) return debts; // la deuda ya fue saldada y eliminada; no se puede restaurar automáticamente
-  return debts.map((d) => (d.id === debtId ? { ...d, balance: Number(d.balance) + Number(amount) } : d));
-}
 
 function simulateDebts(debts, extraPayment, strategy) {
   const working = debts.map((d) => ({ ...d }));
@@ -208,19 +202,11 @@ function FinanzasApp({ user, onLogout }) {
 
   /* ---- setup forms ---- */
   const [incomeForm, setIncomeForm] = useState({ name: "", amount: "", frequency: "mensual" });
-  const [debtForm, setDebtForm] = useState({ name: "", balance: "", rate: "", minPayment: "" });
+  const [debtForm, setDebtForm] = useState(EMPTY_DEBT_FORM);
   const [extraPayment, setExtraPayment] = useState(0);
 
   /* ---- transaction form ---- */
-  const [txForm, setTxForm] = useState({
-    id: null,
-    type: "gasto",
-    amount: "",
-    category: "comida",
-    date: todayStr(),
-    description: "",
-    debtId: "",
-  });
+  const [txForm, setTxForm] = useState(EMPTY_TX_FORM);
   const [copyState, setCopyState] = useState("idle");
 
   /* ------------------------------ derived data ------------------------------ */
@@ -238,8 +224,14 @@ function FinanzasApp({ user, onLogout }) {
     () => monthTx.filter((t) => t.type === "ingreso").reduce((s, t) => s + Number(t.amount), 0),
     [monthTx]
   );
+  // Gasto en efectivo: lo que realmente salió de tu cuenta. Los consumos con tarjeta aún no salieron;
+  // saldrán cuando pagues la tarjeta (movimiento de categoría "deuda").
   const gastoMes = useMemo(
-    () => monthTx.filter((t) => t.type === "gasto").reduce((s, t) => s + Number(t.amount), 0),
+    () => monthTx.filter((t) => t.type === "gasto" && !isCreditCharge(t)).reduce((s, t) => s + Number(t.amount), 0),
+    [monthTx]
+  );
+  const creditChargesMes = useMemo(
+    () => monthTx.filter(isCreditCharge).reduce((s, t) => s + Number(t.amount), 0),
     [monthTx]
   );
   const ingresoMes = monthlyIncomeTotal + extraIncomeMes;
@@ -277,18 +269,20 @@ function FinanzasApp({ user, onLogout }) {
     return "verde";
   }, [budgetRows, balanceMes]);
 
+  // Una tarjeta en $0 sigue existiendo (es rotativa) pero no entra en las estrategias de pago.
+  const activeDebts = useMemo(() => state.debts.filter((d) => Number(d.balance) > 0.01), [state.debts]);
   const totalDebt = useMemo(() => state.debts.reduce((s, d) => s + Number(d.balance), 0), [state.debts]);
 
-  const snowball = useMemo(() => simulateDebts(state.debts, Number(extraPayment) || 0, "snowball"), [state.debts, extraPayment]);
-  const avalanche = useMemo(() => simulateDebts(state.debts, Number(extraPayment) || 0, "avalanche"), [state.debts, extraPayment]);
+  const snowball = useMemo(() => simulateDebts(activeDebts, Number(extraPayment) || 0, "snowball"), [activeDebts, extraPayment]);
+  const avalanche = useMemo(() => simulateDebts(activeDebts, Number(extraPayment) || 0, "avalanche"), [activeDebts, extraPayment]);
   const recommendation = useMemo(() => {
-    if (state.debts.length === 0) return null;
+    if (activeDebts.length === 0) return null;
     const diff = snowball.totalInterest - avalanche.totalInterest;
     if (diff > Math.max(50, avalanche.totalInterest * 0.05)) {
       return { key: "avalancha", reason: `Ahorras aprox. ${fmt(diff)} en intereses frente al método bola de nieve.` };
     }
     return { key: "bola de nieve", reason: "La diferencia de interés entre métodos es pequeña; la bola de nieve te da victorias rápidas que ayudan a mantener el hábito." };
-  }, [state.debts, snowball, avalanche]);
+  }, [activeDebts, snowball, avalanche]);
 
   /* --------------------------------- actions --------------------------------- */
 
@@ -299,70 +293,124 @@ function FinanzasApp({ user, onLogout }) {
   };
   const removeIncome = (id) => setState((s) => ({ ...s, incomes: s.incomes.filter((i) => i.id !== id) }));
 
+  // Crea una deuda nueva o, si debtForm.id existe, actualiza la existente (permite convertir una deuda
+  // antigua en tarjeta y ponerle cupo).
   const addDebt = () => {
-    if (!debtForm.name || !debtForm.balance) return;
+    if (!debtForm.name || debtForm.balance === "") return;
+    const data = {
+      name: debtForm.name,
+      balance: Number(debtForm.balance) || 0,
+      rate: Number(debtForm.rate) || 0,
+      minPayment: Number(debtForm.minPayment) || 0,
+      kind: debtForm.kind === "tarjeta" ? "tarjeta" : "prestamo",
+      limit: debtForm.kind === "tarjeta" ? Number(debtForm.limit) || 0 : 0,
+    };
     setState((s) => ({
       ...s,
-      debts: [...s.debts, { id: uid(), name: debtForm.name, balance: Number(debtForm.balance), rate: Number(debtForm.rate) || 0, minPayment: Number(debtForm.minPayment) || 0 }],
+      debts: debtForm.id
+        ? s.debts.map((d) => (d.id === debtForm.id ? { ...d, ...data } : d))
+        : [...s.debts, { id: uid(), ...data }],
     }));
-    setDebtForm({ name: "", balance: "", rate: "", minPayment: "" });
+    setDebtForm(EMPTY_DEBT_FORM);
   };
+  const editDebt = (d) =>
+    setDebtForm({
+      id: d.id,
+      name: d.name,
+      balance: String(d.balance),
+      rate: String(d.rate ?? ""),
+      minPayment: String(d.minPayment ?? ""),
+      kind: d.kind === "tarjeta" ? "tarjeta" : "prestamo",
+      limit: d.limit ? String(d.limit) : "",
+    });
   const removeDebt = (id) => setState((s) => ({ ...s, debts: s.debts.filter((d) => d.id !== id) }));
 
   const setBudget = (catId, val) =>
     setState((s) => ({ ...s, budgets: { ...s.budgets, [catId]: val === "" ? "" : Number(val) } }));
 
+  /**
+   * Punto único por donde pasa todo movimiento nuevo o editado. Garantiza el "doble registro":
+   * la transacción queda guardada con su categoría y, si apunta a una deuda, el saldo se ajusta
+   * en la misma actualización de estado (nunca quedan desincronizados).
+   * `replacingId`: si se está editando, primero se revierte el efecto de la versión anterior.
+   */
+  const commitTransaction = (tx, replacingId = null) => {
+    let debts = state.debts;
+    let transactions = state.transactions;
+    if (replacingId) {
+      const prev = state.transactions.find((t) => t.id === replacingId);
+      if (prev) debts = reverseTxOnDebts(debts, prev);
+      transactions = transactions.filter((t) => t.id !== replacingId);
+    }
+    const applied = applyTxToDebts(debts, tx);
+    const saved = { ...tx, debtDelta: applied.delta };
+    const idx = replacingId ? state.transactions.findIndex((t) => t.id === replacingId) : -1;
+    transactions = idx >= 0
+      ? [...transactions.slice(0, idx), saved, ...transactions.slice(idx)]
+      : [saved, ...transactions];
+    if (applied.settledDebt) {
+      const name = applied.settledDebt.name;
+      setTimeout(() => alert(`¡Bien hecho! "${name}" quedó saldada y se eliminó automáticamente de tus deudas.`), 100);
+    }
+    setState((s) => ({ ...s, debts: applied.debts, transactions }));
+  };
+
   const submitTx = () => {
     if (!txForm.amount || !txForm.date) return;
     const category = txForm.type === "ingreso" ? "ingreso" : txForm.category;
-    const isDebtPayment = txForm.type === "gasto" && category === "deuda" && txForm.debtId;
-    const debtId = isDebtPayment ? txForm.debtId : null;
-    const debtName = isDebtPayment ? state.debts.find((d) => d.id === debtId)?.name || "deuda" : "";
-    const payload = {
-      id: txForm.id || uid(),
-      type: txForm.type,
-      amount: Number(txForm.amount),
-      category,
-      date: txForm.date,
-      description: txForm.description || (isDebtPayment ? `Abono a ${debtName}` : ""),
-      debtId,
-    };
-
-    let debts = state.debts;
-    let transactions;
-
-    if (txForm.id) {
-      // Editing: first undo the debt effect of the previous version of this transaction
-      const prev = state.transactions.find((t) => t.id === txForm.id);
-      if (prev && prev.category === "deuda" && prev.debtId) {
-        debts = reverseDebtPayment(debts, prev.debtId, prev.amount);
-      }
-      transactions = state.transactions.map((t) => (t.id === txForm.id ? payload : t));
-    } else {
-      transactions = [payload, ...state.transactions];
-    }
-
-    if (payload.category === "deuda" && payload.debtId) {
-      const existedBefore = debts.some((d) => d.id === payload.debtId);
-      debts = applyDebtPayment(debts, payload.debtId, payload.amount);
-      const existsAfter = debts.some((d) => d.id === payload.debtId);
-      if (existedBefore && !existsAfter) {
-        setTimeout(() => alert(`¡Bien hecho! "${debtName}" quedó saldada y se eliminó automáticamente de tus deudas.`), 100);
-      }
-    }
-
-    setState((s) => ({ ...s, debts, transactions }));
-    setTxForm({ id: null, type: "gasto", amount: "", category: "comida", date: todayStr(), description: "", debtId: "" });
+    const isPayment = txForm.type === "gasto" && category === "deuda" && !!txForm.debtId;
+    const isCharge = txForm.type === "gasto" && category !== "deuda" && category !== "ahorro" && !!txForm.chargeDebtId;
+    const debtId = isPayment ? txForm.debtId : null;
+    const chargeDebtId = isCharge ? txForm.chargeDebtId : null;
+    const linked = state.debts.find((d) => d.id === (debtId || chargeDebtId));
+    commitTransaction(
+      {
+        id: txForm.id || uid(),
+        type: txForm.type,
+        amount: Number(txForm.amount),
+        category,
+        date: txForm.date,
+        description:
+          txForm.description ||
+          (isPayment ? `Abono a ${linked?.name || "deuda"}` : isCharge ? `Consumo con ${linked?.name || "tarjeta"}` : ""),
+        debtId,
+        chargeDebtId,
+      },
+      txForm.id || null
+    );
+    setTxForm(EMPTY_TX_FORM());
   };
+
+  // Consumo adicional registrado desde la ficha de una tarjeta (pestaña Deudas).
+  const addChargeToDebt = (debtId, { amount, category, date, description }) => {
+    const debt = state.debts.find((d) => d.id === debtId);
+    commitTransaction({
+      id: uid(),
+      type: "gasto",
+      amount: Number(amount),
+      category,
+      date,
+      description: description || `Consumo con ${debt?.name || "tarjeta"}`,
+      debtId: null,
+      chargeDebtId: debtId,
+    });
+  };
+
   const editTx = (t) =>
-    setTxForm({ ...t, type: t.type, category: t.category === "ingreso" ? "comida" : t.category, debtId: t.debtId || "" });
+    setTxForm({
+      ...EMPTY_TX_FORM(),
+      ...t,
+      category: t.category === "ingreso" ? "comida" : t.category,
+      debtId: t.debtId || "",
+      chargeDebtId: t.chargeDebtId || "",
+    });
   const removeTx = (id) => {
     const tx = state.transactions.find((t) => t.id === id);
-    let debts = state.debts;
-    if (tx && tx.category === "deuda" && tx.debtId) {
-      debts = reverseDebtPayment(debts, tx.debtId, tx.amount);
-    }
-    setState((s) => ({ ...s, debts, transactions: s.transactions.filter((t) => t.id !== id) }));
+    setState((s) => ({
+      ...s,
+      debts: tx ? reverseTxOnDebts(s.debts, tx) : s.debts,
+      transactions: s.transactions.filter((t) => t.id !== id),
+    }));
   };
 
   const exportData = () => {
@@ -480,6 +528,7 @@ function FinanzasApp({ user, onLogout }) {
               budgetRows={budgetRows}
               overallStatus={overallStatus}
               categorySpend={categorySpend}
+              creditChargesMes={creditChargesMes}
             />
           )}
 
@@ -494,6 +543,7 @@ function FinanzasApp({ user, onLogout }) {
               setDebtForm={setDebtForm}
               addDebt={addDebt}
               removeDebt={removeDebt}
+              editDebt={editDebt}
               setBudget={setBudget}
               monthlyIncomeTotal={monthlyIncomeTotal}
             />
@@ -514,6 +564,9 @@ function FinanzasApp({ user, onLogout }) {
           {tab === "deudas" && (
             <DeudasTab
               debts={state.debts}
+              activeDebts={activeDebts}
+              transactions={state.transactions}
+              onAddCharge={addChargeToDebt}
               extraPayment={extraPayment}
               setExtraPayment={setExtraPayment}
               snowball={snowball}
@@ -585,7 +638,7 @@ export default function App() {
 
 /* ------------------------------- dashboard tab ------------------------------ */
 
-function DashboardTab({ ingresoMes, gastoMes, balanceMes, budgetRows, overallStatus, categorySpend }) {
+function DashboardTab({ ingresoMes, gastoMes, balanceMes, budgetRows, overallStatus, categorySpend, creditChargesMes }) {
   const barData = budgetRows.map((b) => ({ name: b.label, Presupuesto: b.limit, Gastado: b.spent }));
   const pieData = budgetRows.filter((b) => b.spent > 0).map((b) => ({ name: b.label, value: b.spent, color: b.color }));
 
@@ -601,6 +654,13 @@ function DashboardTab({ ingresoMes, gastoMes, balanceMes, budgetRows, overallSta
           <Metric label="Balance" value={balanceMes} icon={Wallet} color={balanceMes >= 0 ? "var(--green)" : "var(--red)"} />
         </div>
       </div>
+
+      {creditChargesMes > 0 && (
+        <p className="text-xs flex items-center gap-2" style={{ color: "var(--ink-dim)" }}>
+          <CreditCard size={14} />
+          Este mes cargaste <span className="font-mono-num">{fmt(creditChargesMes)}</span> a tarjetas/deudas: cuentan en tus presupuestos por categoría, pero solo salen de tu balance cuando pagues la tarjeta.
+        </p>
+      )}
 
       <div className="ledger-card p-5">
         <h3 className="font-display text-base mb-4">Semáforo de presupuesto por categoría</h3>
@@ -691,7 +751,7 @@ function Metric({ label, value, icon: Icon, color }) {
 
 /* -------------------------------- config tab -------------------------------- */
 
-function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, debtForm, setDebtForm, addDebt, removeDebt, setBudget, monthlyIncomeTotal }) {
+function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, debtForm, setDebtForm, addDebt, removeDebt, editDebt, setBudget, monthlyIncomeTotal }) {
   return (
     <div className="space-y-6">
       <div className="ledger-card p-5">
@@ -746,11 +806,24 @@ function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, 
       </div>
 
       <div className="ledger-card p-5">
-        <h3 className="font-display text-base mb-4">Deudas activas</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 mb-4">
+        <h3 className="font-display text-base mb-4">{debtForm.id ? "Editar deuda" : "Deudas activas"}</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
           <Field label="Nombre">
             <input placeholder="Tarjeta, préstamo..." value={debtForm.name} onChange={(e) => setDebtForm({ ...debtForm, name: e.target.value })} />
           </Field>
+          <Field label="Tipo">
+            <select value={debtForm.kind} onChange={(e) => setDebtForm({ ...debtForm, kind: e.target.value })}>
+              <option value="prestamo">Préstamo (se elimina al saldarse)</option>
+              <option value="tarjeta">Tarjeta de crédito (rotativa)</option>
+            </select>
+          </Field>
+          {debtForm.kind === "tarjeta" && (
+            <Field label="Cupo total">
+              <input type="number" placeholder="0" value={debtForm.limit} onChange={(e) => setDebtForm({ ...debtForm, limit: e.target.value })} />
+            </Field>
+          )}
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
           <Field label="Saldo total">
             <input type="number" placeholder="0" value={debtForm.balance} onChange={(e) => setDebtForm({ ...debtForm, balance: e.target.value })} />
           </Field>
@@ -760,10 +833,15 @@ function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, 
           <Field label="Pago mínimo">
             <input type="number" placeholder="0" value={debtForm.minPayment} onChange={(e) => setDebtForm({ ...debtForm, minPayment: e.target.value })} />
           </Field>
-          <div className="flex items-end">
-            <button onClick={addDebt} className="btn-brass rounded px-3 py-2 text-sm font-medium flex items-center gap-2 w-full justify-center">
-              <PlusCircle size={15} /> Añadir
+          <div className="flex items-end gap-2">
+            <button onClick={addDebt} className="btn-brass rounded px-3 py-2 text-sm font-medium flex items-center gap-2 flex-1 justify-center">
+              <PlusCircle size={15} /> {debtForm.id ? "Guardar cambios" : "Añadir"}
             </button>
+            {debtForm.id && (
+              <button onClick={() => setDebtForm(EMPTY_DEBT_FORM)} className="btn-ghost rounded px-3 py-2 text-sm" aria-label="Cancelar edición">
+                <X size={15} />
+              </button>
+            )}
           </div>
         </div>
         <div className="divide-y hairline">
@@ -775,13 +853,19 @@ function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, 
           {state.debts.map((d) => (
             <div key={d.id} className="flex items-center justify-between py-2 text-sm">
               <span>
-                {d.name} <span style={{ color: "var(--ink-dim)" }}>· {d.rate}% anual · mín. {fmt(d.minPayment)}</span>
+                {d.name}{" "}
+                <span style={{ color: "var(--ink-dim)" }}>
+                  · {d.kind === "tarjeta" ? `tarjeta${d.limit ? ` · cupo ${fmt(d.limit)}` : ""}` : "préstamo"} · {d.rate}% anual · mín. {fmt(d.minPayment)}
+                </span>
               </span>
               <div className="flex items-center gap-3">
                 <span className="font-mono-num" style={{ color: "var(--red)" }}>
                   {fmt(d.balance)}
                 </span>
-                <button onClick={() => removeDebt(d.id)} style={{ color: "var(--ink-dim)" }}>
+                <button onClick={() => editDebt(d)} style={{ color: "var(--ink-dim)" }} aria-label="Editar deuda">
+                  <Pencil size={15} />
+                </button>
+                <button onClick={() => removeDebt(d.id)} style={{ color: "var(--ink-dim)" }} aria-label="Eliminar deuda">
                   <Trash2 size={15} />
                 </button>
               </div>
@@ -813,6 +897,11 @@ function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, 
 
 function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transactions, debts }) {
   const selectedDebt = txForm.debtId ? debts.find((d) => d.id === txForm.debtId) : null;
+  const canCharge = txForm.type === "gasto" && txForm.category !== "deuda" && txForm.category !== "ahorro";
+  const chargeDebt = canCharge && txForm.chargeDebtId ? debts.find((d) => d.id === txForm.chargeDebtId) : null;
+  const chargeAfter = chargeDebt ? Number(chargeDebt.balance) + (Number(txForm.amount) || 0) : 0;
+  const chargeOverLimit = chargeDebt && Number(chargeDebt.limit) > 0 && chargeAfter > Number(chargeDebt.limit);
+  const debtById = (id) => debts.find((d) => d.id === id);
   return (
     <div className="space-y-6">
       <div className="ledger-card p-5">
@@ -829,7 +918,7 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
           </Field>
           {txForm.type === "gasto" && (
             <Field label="Categoría">
-              <select value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value, debtId: "" })}>
+              <select value={txForm.category} onChange={(e) => setTxForm({ ...txForm, category: e.target.value, debtId: "", chargeDebtId: "" })}>
                 {CATEGORIES.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.label}
@@ -856,7 +945,29 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
               </select>
             </Field>
           )}
+          {canCharge && debts.length > 0 && (
+            <Field label="Cargar a tarjeta / deuda (opcional)">
+              <select value={txForm.chargeDebtId || ""} onChange={(e) => setTxForm({ ...txForm, chargeDebtId: e.target.value })}>
+                <option value="">No, pagué en efectivo / débito</option>
+                {debts.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} · saldo {fmt(d.balance)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
         </div>
+        {chargeDebt && Number(txForm.amount) > 0 && (
+          <p className="text-xs mt-2" style={{ color: chargeOverLimit ? "var(--red)" : "var(--ink-dim)" }}>
+            Saldo de "{chargeDebt.name}" después de este consumo: <span className="font-mono-num">{fmt(chargeAfter)}</span>
+            {Number(chargeDebt.limit) > 0 && (
+              <> · cupo disponible <span className="font-mono-num">{fmt(Math.max(0, chargeDebt.limit - chargeAfter))}</span></>
+            )}
+            {chargeOverLimit && " · ¡supera el cupo de la tarjeta!"}
+            . No descuenta tu balance de efectivo hasta que pagues la tarjeta.
+          </p>
+        )}
         {txForm.type === "gasto" && txForm.category === "deuda" && !txForm.debtId && (
           <p className="text-xs mt-2" style={{ color: "var(--amber)" }}>
             Si no eliges a qué deuda corresponde, el pago se registrará como gasto pero no descontará ningún saldo.
@@ -876,7 +987,7 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
           </button>
           {txForm.id && (
             <button
-              onClick={() => setTxForm({ id: null, type: "gasto", amount: "", category: "comida", date: todayStr(), description: "", debtId: "" })}
+              onClick={() => setTxForm(EMPTY_TX_FORM())}
               className="btn-ghost rounded px-4 py-2 text-sm font-medium flex items-center gap-2"
             >
               <X size={15} /> Cancelar
@@ -918,8 +1029,13 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
                       </td>
                       <td className="py-2 pr-3" style={{ color: "var(--ink-dim)" }}>
                         {t.description || "—"}
+                        {isCreditCharge(t) && (
+                          <span className="ml-2 text-xs" style={{ color: "var(--amber)" }}>
+                            · a crédito ({debtById(t.chargeDebtId)?.name || "deuda saldada"})
+                          </span>
+                        )}
                       </td>
-                      <td className="py-2 pr-3 text-right font-mono-num" style={{ color: t.type === "ingreso" ? "var(--green)" : "var(--red)" }}>
+                      <td className="py-2 pr-3 text-right font-mono-num" style={{ color: t.type === "ingreso" ? "var(--green)" : isCreditCharge(t) ? "var(--amber)" : "var(--red)" }}>
                         {t.type === "ingreso" ? "+" : "-"}
                         {fmt(t.amount)}
                       </td>
@@ -947,7 +1063,7 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
 
 /* -------------------------------- deudas tab --------------------------------- */
 
-function DeudasTab({ debts, extraPayment, setExtraPayment, snowball, avalanche, recommendation, totalDebt }) {
+function DeudasTab({ debts, activeDebts, transactions, onAddCharge, extraPayment, setExtraPayment, snowball, avalanche, recommendation, totalDebt }) {
   return (
     <div className="space-y-6">
       <div className="ledger-card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -970,50 +1086,36 @@ function DeudasTab({ debts, extraPayment, setExtraPayment, snowball, avalanche, 
         </div>
       ) : (
         <>
-          {recommendation && (
-            <div className="ledger-card p-5" style={{ borderColor: "var(--brass)" }}>
-              <div className="flex items-center gap-2 mb-2">
-                <Mountain size={18} style={{ color: "var(--brass)" }} />
-                <h3 className="font-display text-base">
-                  Recomendación: método <span style={{ color: "var(--brass)" }}>{recommendation.key}</span>
-                </h3>
-              </div>
-              <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
-                {recommendation.reason}
+          <DebtManager debts={debts} transactions={transactions} categories={CHARGEABLE_CATEGORIES} onAddCharge={onAddCharge} />
+
+          {activeDebts.length === 0 ? (
+            <div className="ledger-card p-5">
+              <p className="text-sm flex items-center gap-2" style={{ color: "var(--green)" }}>
+                <CheckCircle2 size={15} /> No tienes saldo pendiente: no hay estrategia de pago que simular.
               </p>
             </div>
+          ) : (
+            <>
+              {recommendation && (
+                <div className="ledger-card p-5" style={{ borderColor: "var(--brass)" }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Mountain size={18} style={{ color: "var(--brass)" }} />
+                    <h3 className="font-display text-base">
+                      Recomendación: método <span style={{ color: "var(--brass)" }}>{recommendation.key}</span>
+                    </h3>
+                  </div>
+                  <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
+                    {recommendation.reason}
+                  </p>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <StrategyCard icon={Snowflake} title="Bola de nieve" subtitle="Paga primero el saldo más pequeño" result={snowball} debts={activeDebts} order="snowball" />
+                <StrategyCard icon={Mountain} title="Avalancha" subtitle="Paga primero la tasa más alta" result={avalanche} debts={activeDebts} order="avalanche" />
+              </div>
+            </>
           )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <StrategyCard icon={Snowflake} title="Bola de nieve" subtitle="Paga primero el saldo más pequeño" result={snowball} debts={debts} order="snowball" />
-            <StrategyCard icon={Mountain} title="Avalancha" subtitle="Paga primero la tasa más alta" result={avalanche} debts={debts} order="avalanche" />
-          </div>
-
-          <div className="ledger-card p-5">
-            <h3 className="font-display text-base mb-4">Tus deudas</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left border-b hairline" style={{ color: "var(--ink-dim)" }}>
-                    <th className="py-2 pr-3 font-normal">Nombre</th>
-                    <th className="py-2 pr-3 font-normal text-right">Saldo</th>
-                    <th className="py-2 pr-3 font-normal text-right">Tasa anual</th>
-                    <th className="py-2 pl-3 font-normal text-right">Pago mínimo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {debts.map((d) => (
-                    <tr key={d.id} className="border-b hairline">
-                      <td className="py-2 pr-3">{d.name}</td>
-                      <td className="py-2 pr-3 text-right font-mono-num">{fmt(d.balance)}</td>
-                      <td className="py-2 pr-3 text-right font-mono-num">{d.rate}%</td>
-                      <td className="py-2 pl-3 text-right font-mono-num">{fmt(d.minPayment)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </>
       )}
     </div>
