@@ -4,11 +4,18 @@ import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import { useAuth } from "./useAuth";
 import AuthScreen from "./AuthScreen.jsx";
+import { getCategoryColor } from "./lib/categoryColors.js";
+import { CategoryBadge } from "./components/CategoryVisuals.jsx";
+import { fmt, todayStr, thisMonthKey, thisYear, thisMonthIndex } from "./lib/format.js";
+import { buildMonthlySummaries } from "./lib/annualSummary.js";
+import AnnualSummary from "./components/AnnualSummary.jsx";
+import SavingsGoalsModule from "./components/SavingsGoals.jsx";
 import {
   LayoutDashboard, Settings2, ListChecks, Mountain, Save, Home, Utensils,
   Car, Film, HeartPulse, MoreHorizontal, PlusCircle, Trash2, Pencil, X,
   Download, Upload, TrendingUp, TrendingDown, Wallet, AlertTriangle,
   CheckCircle2, Snowflake, RotateCcw, Copy, Check, CreditCard, LogOut, CloudOff,
+  PiggyBank, BarChart3,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -17,26 +24,26 @@ import {
 
 /* ---------------------------------- data ---------------------------------- */
 
+// El color de cada categoría viene de la paleta centralizada en lib/categoryColors.js
+// (Requerimiento 1) — aquí solo se añade el ícono, que es un detalle de esta UI concreta.
 const CATEGORIES = [
-  { id: "vivienda", label: "Vivienda", icon: Home, color: "#C9A227" },
-  { id: "comida", label: "Comida", icon: Utensils, color: "#4F9D69" },
-  { id: "transporte", label: "Transporte", icon: Car, color: "#5C8AA6" },
-  { id: "entretenimiento", label: "Entretenimiento", icon: Film, color: "#B5533C" },
-  { id: "salud", label: "Salud", icon: HeartPulse, color: "#9C6BB0" },
-  { id: "deuda", label: "Deuda", icon: CreditCard, color: "#D9A441" },
-  { id: "otros", label: "Otros", icon: MoreHorizontal, color: "#9CA6A8" },
+  { id: "vivienda", label: "Vivienda", icon: Home, color: getCategoryColor("vivienda").hex },
+  { id: "comida", label: "Comida", icon: Utensils, color: getCategoryColor("comida").hex },
+  { id: "transporte", label: "Transporte", icon: Car, color: getCategoryColor("transporte").hex },
+  { id: "entretenimiento", label: "Entretenimiento", icon: Film, color: getCategoryColor("entretenimiento").hex },
+  { id: "salud", label: "Salud", icon: HeartPulse, color: getCategoryColor("salud").hex },
+  { id: "deuda", label: "Deuda", icon: CreditCard, color: getCategoryColor("deuda").hex },
+  { id: "ahorro", label: "Ahorro", icon: PiggyBank, color: getCategoryColor("ahorro").hex },
+  { id: "otros", label: "Otros", icon: MoreHorizontal, color: getCategoryColor("otros").hex },
 ];
-const catById = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[6];
+const catById = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[CATEGORIES.length - 1];
 const FREQ_FACTORS = { mensual: 1, quincenal: 2, semanal: 4.33, variable: 1 };
 const FREQ_LABEL = { mensual: "Mensual", quincenal: "Quincenal", semanal: "Semanal", variable: "Variable" };
 
 const uid = () => Math.random().toString(36).slice(2, 10);
-const fmt = (n) =>
-  "$" + Number(n || 0).toLocaleString("es-CO", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-const todayStr = () => new Date().toISOString().slice(0, 10);
-const thisMonthKey = () => new Date().toISOString().slice(0, 7);
+// fmt, todayStr y thisMonthKey ahora viven en ./lib/format.js (ver imports arriba)
 
-const emptyState = { incomes: [], debts: [], budgets: {}, transactions: [] };
+const emptyState = { incomes: [], debts: [], budgets: {}, transactions: [], savingsGoals: { monthly: 0, annual: 0 } };
 const STORAGE_KEY = "finanzas-personales-v1";
 
 /* ------------------------------- debt engine ------------------------------- */
@@ -238,6 +245,15 @@ function FinanzasApp({ user, onLogout }) {
   const ingresoMes = monthlyIncomeTotal + extraIncomeMes;
   const balanceMes = ingresoMes - gastoMes;
 
+  // Resumen mensual del año en curso, reutilizado por el módulo de Metas de Ahorro (Requerimiento 3).
+  // El histórico anual completo (Requerimiento 2) vive dentro de <AnnualSummary>, que recalcula por su
+  // cuenta según el año que el usuario elija en su propio selector.
+  const monthsThisYear = useMemo(
+    () => buildMonthlySummaries(state.transactions, thisYear()),
+    [state.transactions]
+  );
+  const setSavingsGoals = (goals) => setState((s) => ({ ...s, savingsGoals: goals }));
+
   const categorySpend = useMemo(() => {
     const map = {};
     CATEGORIES.forEach((c) => (map[c.id] = 0));
@@ -401,6 +417,8 @@ function FinanzasApp({ user, onLogout }) {
     { id: "config", label: "Configuración", icon: Settings2 },
     { id: "movimientos", label: "Movimientos", icon: ListChecks },
     { id: "deudas", label: "Deudas", icon: Mountain },
+    { id: "ahorro", label: "Ahorro", icon: PiggyBank },
+    { id: "historico", label: "Histórico", icon: BarChart3 },
     { id: "datos", label: "Datos", icon: Save },
   ];
 
@@ -504,6 +522,17 @@ function FinanzasApp({ user, onLogout }) {
               totalDebt={totalDebt}
             />
           )}
+
+          {tab === "ahorro" && (
+            <SavingsGoalsModule
+              monthsThisYear={monthsThisYear}
+              currentMonthIndex={thisMonthIndex()}
+              goals={state.savingsGoals}
+              onSaveGoals={setSavingsGoals}
+            />
+          )}
+
+          {tab === "historico" && <AnnualSummary transactions={state.transactions} />}
 
           {tab === "datos" && (
             <DatosTab
@@ -884,9 +913,7 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
                         {t.type === "ingreso" ? (
                           <span style={{ color: "var(--green)" }}>Ingreso</span>
                         ) : (
-                          <span className="flex items-center gap-1.5">
-                            <c.icon size={13} style={{ color: c.color }} /> {c.label}
-                          </span>
+                          <CategoryBadge category={t.category} label={c.label} size="xs" />
                         )}
                       </td>
                       <td className="py-2 pr-3" style={{ color: "var(--ink-dim)" }}>
