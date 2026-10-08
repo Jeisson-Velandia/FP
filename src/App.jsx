@@ -10,6 +10,7 @@ import { fmt, todayStr, thisMonthKey, thisYear, thisMonthIndex } from "./lib/for
 import { buildMonthlySummaries } from "./lib/annualSummary.js";
 import AnnualSummary from "./components/AnnualSummary.jsx";
 import SavingsGoalsModule from "./components/SavingsGoals.jsx";
+import ChatBox from "./components/ChatBox.jsx";
 import WhatsAppLink from "./components/WhatsAppLink.jsx";
 import DebtManager from "./components/DebtManager.jsx";
 import { applyTxToDebts, reverseTxOnDebts, isCreditCharge } from "./lib/debts.js";
@@ -114,17 +115,19 @@ function Field({ label, children }) {
 
 function Stamp({ status }) {
   const map = {
-    verde: { text: "SALUDABLE", color: "var(--green)" },
-    amarillo: { text: "PRECAUCIÓN", color: "var(--amber)" },
-    rojo: { text: "ALERTA", color: "var(--red)" },
+    verde: { text: "Saludable", sub: "Vas dentro de tu presupuesto", color: "var(--green)", icon: CheckCircle2 },
+    amarillo: { text: "Precaución", sub: "Alguna categoría está cerca del límite", color: "var(--amber)", icon: AlertTriangle },
+    rojo: { text: "Alerta", sub: "Superaste un límite o tu balance", color: "var(--red)", icon: AlertTriangle },
   };
   const s = map[status];
+  const Icon = s.icon;
   return (
-    <div
-      className="stamp shrink-0 w-32 h-32 flex items-center justify-center text-center px-3"
-      style={{ color: s.color }}
-    >
-      <span className="font-display text-sm tracking-widest leading-tight">{s.text}</span>
+    <div className="stamp shrink-0 w-full sm:w-44 flex sm:flex-col items-center justify-center gap-2 text-center px-4 py-4" style={{ color: s.color }}>
+      <Icon size={28} />
+      <div>
+        <span className="font-display text-base block leading-tight">{s.text}</span>
+        <span className="text-[11px] leading-tight block" style={{ color: "var(--ink-dim)" }}>{s.sub}</span>
+      </div>
     </div>
   );
 }
@@ -148,11 +151,11 @@ function BottomNavButton({ active, onClick, icon: Icon, label }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-1 flex-col items-center justify-center gap-1 py-2"
+      className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 ${active ? "on" : ""}`}
       style={{ color: active ? "var(--brass)" : "var(--ink-dim)" }}
     >
-      <Icon size={20} />
-      <span className="text-[10px] font-medium leading-none text-center">{label}</span>
+      <Icon size={21} />
+      <span className="text-[11px] font-medium leading-none text-center">{label}</span>
     </button>
   );
 }
@@ -447,6 +450,9 @@ function FinanzasApp({ user, onLogout }) {
     }));
   };
 
+  const [moreOpen, setMoreOpen] = useState(false);
+  const applyQuick = (next) => setState((s) => ({ ...s, debts: next.debts, transactions: next.transactions }));
+
   const exportData = () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -494,11 +500,12 @@ function FinanzasApp({ user, onLogout }) {
     if (confirm("¿Borrar todos los datos? Esta acción no se puede deshacer.")) setState(emptyState);
   };
 
+  const PRIMARY_TABS = ["dashboard", "movimientos", "deudas", "ahorro"];
   const NAV = [
-    { id: "dashboard", label: "Tablero", icon: LayoutDashboard },
+    { id: "dashboard", label: "Tablero", short: "Inicio", icon: LayoutDashboard },
     { id: "config", label: "Configuración", icon: Settings2 },
-    { id: "movimientos", label: "Movimientos", icon: ListChecks },
-    { id: "deudas", label: "Deudas", icon: Mountain },
+    { id: "movimientos", label: "Movimientos", short: "Movim.", icon: ListChecks },
+    { id: "deudas", label: "Deudas", icon: CreditCard },
     { id: "ahorro", label: "Ahorro", icon: PiggyBank },
     { id: "historico", label: "Histórico", icon: BarChart3 },
     { id: "datos", label: "Datos", icon: Save },
@@ -513,7 +520,7 @@ function FinanzasApp({ user, onLogout }) {
         <div className="flex items-center gap-3 min-w-0">
           <Wallet size={22} style={{ color: "var(--brass)" }} className="shrink-0" />
           <div className="min-w-0">
-            <h1 className="font-display text-xl tracking-wide">Mi Libro Mayor</h1>
+            <h1 className="font-display text-xl">Mi Libro Mayor</h1>
             <p className="text-xs truncate" style={{ color: "var(--ink-dim)" }}>
               {syncError ? (
                 <span className="flex items-center gap-1" style={{ color: "var(--amber)" }}>
@@ -553,7 +560,8 @@ function FinanzasApp({ user, onLogout }) {
         </nav>
 
         {/* Main content - extra bottom padding on mobile so the bottom bar never overlaps content */}
-        <main className="flex-1 p-5 md:p-8 space-y-6 max-w-6xl pb-24 md:pb-8">
+        <main className="flex-1 p-5 md:p-8 space-y-6 max-w-6xl pb-28 md:pb-8 min-w-0">
+          {(tab === "dashboard" || tab === "movimientos") && <ChatBox data={state} onApply={applyQuick} compact={tab === "movimientos"} />}
           {tab === "dashboard" && (
             <DashboardTab
               ingresoMes={ingresoMes}
@@ -642,10 +650,37 @@ function FinanzasApp({ user, onLogout }) {
       </div>
 
       {/* Bottom tab bar - mobile only, fixed to viewport bottom */}
+      {moreOpen && (
+        <div className="more-sheet md:hidden" role="menu">
+          {NAV.filter((n) => !PRIMARY_TABS.includes(n.id)).map((n) => (
+            <button
+              key={n.id}
+              className={tab === n.id ? "on" : ""}
+              style={{ color: tab === n.id ? "var(--brass)" : "var(--ink)" }}
+              onClick={() => {
+                setTab(n.id);
+                setMoreOpen(false);
+              }}
+            >
+              <n.icon size={20} /> {n.label}
+            </button>
+          ))}
+        </div>
+      )}
       <nav className="bottom-nav md:hidden fixed bottom-0 left-0 right-0 flex z-50">
-        {NAV.map((n) => (
-          <BottomNavButton key={n.id} active={tab === n.id} onClick={() => setTab(n.id)} icon={n.icon} label={n.label} />
+        {NAV.filter((n) => PRIMARY_TABS.includes(n.id)).map((n) => (
+          <BottomNavButton
+            key={n.id}
+            active={tab === n.id}
+            onClick={() => {
+              setTab(n.id);
+              setMoreOpen(false);
+            }}
+            icon={n.icon}
+            label={n.short || n.label}
+          />
         ))}
+        <BottomNavButton active={moreOpen || !PRIMARY_TABS.includes(tab)} onClick={() => setMoreOpen((o) => !o)} icon={MoreHorizontal} label="Más" />
       </nav>
     </div>
   );
@@ -732,10 +767,10 @@ function DashboardTab({ ingresoMes, gastoMes, balanceMes, budgetRows, overallSta
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)" />
                 <XAxis dataKey="name" tick={{ fill: "var(--ink-dim)", fontSize: 11 }} />
                 <YAxis tick={{ fill: "var(--ink-dim)", fontSize: 11 }} />
-                <Tooltip contentStyle={{ background: "#1B2428", border: "1px solid var(--rule)", color: "#ECE7DA" }} />
+                <Tooltip contentStyle={{ background: "#1A2234", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 10, color: "#E7EAF3" }} />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Presupuesto" fill="#8FA09D" radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Gastado" fill="#C9A227" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Presupuesto" fill="#8B93A8" radius={[2, 2, 0, 0]} />
+                <Bar dataKey="Gastado" fill="#10B981" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -756,7 +791,7 @@ function DashboardTab({ ingresoMes, gastoMes, balanceMes, budgetRows, overallSta
                       <Cell key={i} fill={d.color} />
                     ))}
                   </Pie>
-                  <Tooltip contentStyle={{ background: "#1B2428", border: "1px solid var(--rule)", color: "#ECE7DA" }} />
+                  <Tooltip contentStyle={{ background: "#1A2234", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 10, color: "#E7EAF3" }} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                 </PieChart>
               </ResponsiveContainer>

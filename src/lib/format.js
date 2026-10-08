@@ -22,7 +22,10 @@ export const MONTH_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "A
  * @returns {string}
  */
 export function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  // Fecha LOCAL del usuario (toISOString usa UTC y, de noche en Colombia, daría la fecha de mañana).
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /**
@@ -30,7 +33,7 @@ export function todayStr() {
  * @returns {string}
  */
 export function thisMonthKey() {
-  return new Date().toISOString().slice(0, 7);
+  return todayStr().slice(0, 7);
 }
 
 /**

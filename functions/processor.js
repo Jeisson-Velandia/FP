@@ -12,17 +12,11 @@
  *   waMessages/{wamid}    → { at }                   idempotencia: Meta reintenta entregas
  *   waThrottle/{phone}    → { fails, windowStart }   freno a intentos de adivinar códigos
  */
-import { parseMessage, matchDebt } from "./lib/messageParser.js";
-import { applyTxToDebts, reverseTxOnDebts, debtMetrics } from "./lib/debts.js";
-import { monthBalance } from "./lib/monthly.js";
-import { fmt } from "./lib/format.js";
+import { parseMessage } from "./lib/messageParser.js";
+import { applyCommand } from "./lib/quickEntry.js";
 
 const MAX_LINK_FAILS = 5;
 const LINK_WINDOW_MS = 15 * 60 * 1000;
-const CATEGORY_LABEL = {
-  vivienda: "Vivienda", comida: "Comida", transporte: "Transporte", entretenimiento: "Entretenimiento",
-  salud: "Salud", deuda: "Deuda", ahorro: "Ahorro", otros: "Otros", ingreso: "Ingreso",
-};
 
 export const HELP_TEXT = [
   "👋 *Finanzas Personales*",
@@ -72,112 +66,13 @@ export async function processIncoming(db, { from, text, wamid, now = new Date(),
     if (dedupe.exists) return null; // Meta reintentó este mensaje: ya fue procesado
     if (!profileSnap.exists) return "No encontré los datos de tu cuenta. Abre la app una vez e inicia sesión.";
     const data = profileSnap.data();
-    const debts = data.debts || [];
-    const transactions = data.transactions || [];
 
-    if (cmd.kind === "balance") {
-      tx.set(dedupeRef, { at: now.getTime() });
-      return balanceReply(data, today);
-    }
-
-    if (cmd.kind === "undo") {
-      const last = transactions.find((t) => t.source === "whatsapp");
-      tx.set(dedupeRef, { at: now.getTime() });
-      if (!last) return "No tengo movimientos registrados por WhatsApp para deshacer.";
-      tx.set(profileRef, {
-        ...data,
-        debts: reverseTxOnDebts(debts, last),
-        transactions: transactions.filter((t) => t.id !== last.id),
-      });
-      const b = monthBalance({ incomes: data.incomes, transactions: transactions.filter((t) => t.id !== last.id) }, today.slice(0, 7));
-      return `↩️ Deshice #${last.id} (${fmt(last.amount)} · ${CATEGORY_LABEL[last.category] || last.category}).\n📊 Balance del mes: ${fmt(b.balance)}`;
-    }
-
-    // ---- registro de un movimiento ----
-    let debtId = null;
-    let chargeDebtId = null;
-    let linked = null;
-    if (cmd.type === "gasto" && cmd.category === "deuda" && debts.length) {
-      linked = matchDebt(cmd.description, debts);
-      if (!linked && debts.length === 1) linked = debts[0];
-      if (!linked) {
-        tx.set(dedupeRef, { at: now.getTime() });
-        return `¿A cuál deuda va el pago? Incluye su nombre, por ejemplo: \`${cmd.amount} deuda pago ${debts[0].name.toLowerCase()}\`.\nTus deudas: ${debts.map((d) => d.name).join(", ")}.`;
-      }
-      debtId = linked.id;
-    } else if (cmd.type === "gasto" && cmd.category !== "deuda" && cmd.category !== "ahorro") {
-      // Solo tarjetas admiten "consumo a crédito" por texto (evita cargar "gasolina moto" a un préstamo).
-      linked = matchDebt(cmd.description, debts.filter((d) => d.kind === "tarjeta"));
-      if (linked) chargeDebtId = linked.id;
-    }
-
-    const record = {
-      id: newId(),
-      type: cmd.type,
-      amount: cmd.amount,
-      category: cmd.category,
-      date: today,
-      description: cmd.description || (debtId ? `Abono a ${linked.name}` : chargeDebtId ? `Consumo con ${linked.name}` : ""),
-      debtId,
-      chargeDebtId,
-      source: "whatsapp",
-    };
-    const applied = applyTxToDebts(debts, record);
-    record.debtDelta = applied.delta;
-
-    const nextTransactions = [record, ...transactions];
-    tx.set(profileRef, { ...data, debts: applied.debts, transactions: nextTransactions });
-    tx.set(dedupeRef, { at: now.getTime() });
-
-    return registerReply({ record, linked, applied, data: { ...data, transactions: nextTransactions }, today });
+    // La lógica de registrar / consultar / deshacer es la misma que usa el chat de la app.
+    const result = applyCommand(data, cmd, { today, newId, source: "whatsapp" });
+    tx.set(dedupeRef, { at: now.getTime() }); // se marca como procesado aunque no haya cambios
+    if (result.data) tx.set(profileRef, result.data);
+    return result.reply;
   });
-}
-
-/** @returns {string} */
-function registerReply({ record, linked, applied, data, today }) {
-  const b = monthBalance(data, today.slice(0, 7));
-  const label = CATEGORY_LABEL[record.category] || record.category;
-  const lines = [`✅ Registrado *#${record.id}*`];
-  lines.push(`${record.type === "ingreso" ? "💰" : "💸"} ${fmt(record.amount)} · ${label}${record.description ? ` (${record.description})` : ""}`);
-
-  if (applied.settledDebt) {
-    lines.push(`🎉 ¡"${applied.settledDebt.name}" quedó saldada y se eliminó de tus deudas!`);
-  } else if (record.debtId && linked) {
-    const d = applied.debts.find((x) => x.id === record.debtId);
-    lines.push(`📉 Saldo de ${linked.name}: ${fmt(d?.balance ?? 0)}`);
-  } else if (record.chargeDebtId && linked) {
-    const d = applied.debts.find((x) => x.id === record.chargeDebtId);
-    const m = d ? debtMetrics(d) : null;
-    lines.push(`💳 Cargado a ${linked.name} · saldo ${fmt(d?.balance ?? 0)}`);
-    if (m?.hasLimit) lines.push(`   Cupo disponible: ${fmt(m.available)} (${Math.round(m.utilizationPct)}% usado)${m.overLimit ? " ⚠️ supera el cupo" : ""}`);
-  }
-
-  if (record.type === "gasto" && record.category !== "ahorro" && record.category !== "deuda") {
-    const budget = Number(data.budgets?.[record.category]) || 0;
-    if (budget > 0) {
-      const spent = data.transactions
-        .filter((t) => t.type === "gasto" && t.category === record.category && String(t.date).slice(0, 7) === today.slice(0, 7))
-        .reduce((s, t) => s + Number(t.amount), 0);
-      lines.push(`🎯 Presupuesto ${label}: ${spent > budget ? "te pasaste por " + fmt(spent - budget) : "te quedan " + fmt(budget - spent)}`);
-    }
-  }
-  lines.push(`📊 Te quedan *${fmt(b.balance)}* este mes${b.balance < 0 ? " ⚠️" : ""}`);
-  return lines.join("\n");
-}
-
-/** @returns {string} */
-function balanceReply(data, today) {
-  const b = monthBalance(data, today.slice(0, 7));
-  const lines = [
-    "📊 *Resumen del mes*",
-    `Ingresos: ${fmt(b.ingresos)}`,
-    `Gastos (efectivo): ${fmt(b.gastos)}`,
-    `Balance: *${fmt(b.balance)}*${b.balance < 0 ? " ⚠️" : ""}`,
-  ];
-  if (b.consumosCredito > 0) lines.push(`💳 Consumos a crédito del mes: ${fmt(b.consumosCredito)} (se descuentan al pagar la tarjeta)`);
-  const total = (data.debts || []).reduce((s, d) => s + Number(d.balance), 0);
-  if (total > 0) lines.push(`Deuda total: ${fmt(total)}`);
-  return lines.join("\n");
 }
 
 /** Vincula un número de WhatsApp con la cuenta que generó el código en la app. */

@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const files = ["debts.js", "format.js", "messageParser.js", "monthly.js"];
+const files = ["debts.js", "format.js", "messageParser.js", "monthly.js", "quickEntry.js"];
 mkdirSync(join(root, "functions", "lib"), { recursive: true });
 for (const f of files) copyFileSync(join(root, "src", "lib", f), join(root, "functions", "lib", f));
 console.log(`sync: ${files.length} módulos copiados a functions/lib`);

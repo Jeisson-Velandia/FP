@@ -73,7 +73,7 @@ export default function AnnualSummary({ transactions }) {
                 <XAxis dataKey="name" tick={{ fill: "var(--ink-dim)", fontSize: 11 }} />
                 <YAxis tick={{ fill: "var(--ink-dim)", fontSize: 11 }} />
                 <Tooltip
-                  contentStyle={{ background: "#1B2428", border: "1px solid var(--rule)", color: "#ECE7DA" }}
+                  contentStyle={{ background: "#1A2234", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 10, color: "#E7EAF3" }}
                   formatter={(value) => fmt(/** @type {number} */ (value))}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
