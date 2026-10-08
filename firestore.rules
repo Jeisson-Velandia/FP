@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Datos de la app: cada usuario solo ve y escribe su propio documento.
+    match /profiles/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Códigos de vinculación de WhatsApp: los crea la app (usuario autenticado) para sí mismo,
+    // con vigencia máxima de 15 minutos. La Cloud Function (Admin SDK) los consume y borra.
+    match /linkCodes/{code} {
+      allow create: if request.auth != null
+        && code.matches('^[0-9]{6}$')
+        && request.resource.data.keys().hasOnly(['uid', 'expiresAt', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.expiresAt is number
+        && request.resource.data.expiresAt > request.time.toMillis()
+        && request.resource.data.expiresAt <= request.time.toMillis() + 15 * 60 * 1000;
+      allow read, delete: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // Número de WhatsApp ↔ cuenta. SOLO la Cloud Function escribe (el Admin SDK ignora estas reglas).
+    // El dueño puede ver que está vinculado y desvincularse.
+    match /phoneLinks/{phone} {
+      allow read, delete: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow create, update: if false;
+    }
+
+    // Internas del bot (idempotencia y freno de intentos): nadie desde el cliente.
+    match /waMessages/{id} { allow read, write: if false; }
+    match /waThrottle/{id} { allow read, write: if false; }
+
+    match /{document=**} { allow read, write: if false; }
+  }
+}

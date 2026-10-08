@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import { db, auth } from "./firebase";
 import { useAuth } from "./useAuth";
@@ -10,6 +10,7 @@ import { fmt, todayStr, thisMonthKey, thisYear, thisMonthIndex } from "./lib/for
 import { buildMonthlySummaries } from "./lib/annualSummary.js";
 import AnnualSummary from "./components/AnnualSummary.jsx";
 import SavingsGoalsModule from "./components/SavingsGoals.jsx";
+import WhatsAppLink from "./components/WhatsAppLink.jsx";
 import DebtManager from "./components/DebtManager.jsx";
 import { applyTxToDebts, reverseTxOnDebts, isCreditCharge } from "./lib/debts.js";
 import {
@@ -41,6 +42,15 @@ const CATEGORIES = [
 const catById = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[CATEGORIES.length - 1];
 const FREQ_FACTORS = { mensual: 1, quincenal: 2, semanal: 4.33, variable: 1 };
 const FREQ_LABEL = { mensual: "Mensual", quincenal: "Quincenal", semanal: "Semanal", variable: "Variable" };
+
+// JSON con llaves ordenadas: Firestore no garantiza el orden de las llaves, y sin esto dos objetos
+// idénticos podrían parecer distintos al compararlos.
+const stableStringify = (v) =>
+  JSON.stringify(v, (_, x) =>
+    x && typeof x === "object" && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1)))
+      : x
+  );
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 // fmt, todayStr y thisMonthKey ahora viven en ./lib/format.js (ver imports arriba)
@@ -164,23 +174,39 @@ function FinanzasApp({ user, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const fileInputRef = useRef(null);
 
-  // Carga inicial desde Firestore (la nube manda una vez llega)
+  // Sincronización en vivo con Firestore. Además de la carga inicial, escuchamos cambios remotos porque
+  // el bot de WhatsApp también escribe en este documento: sin esto, un movimiento registrado por el
+  // celular quedaría pisado por el siguiente guardado de la app abierta.
+  const lastSyncedRef = useRef(null); // JSON estable de lo último que coincide con la nube
+  const dirtyRef = useRef(false); // hay cambios locales aún sin confirmar en la nube
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   useEffect(() => {
     let active = true;
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, "profiles", user.uid));
-        if (active && snap.exists()) {
-          setState({ ...emptyState, ...snap.data() });
+    const unsub = onSnapshot(
+      doc(db, "profiles", user.uid),
+      (snap) => {
+        if (!active) return;
+        if (snap.exists() && !snap.metadata.hasPendingWrites && !dirtyRef.current) {
+          const remote = { ...emptyState, ...snap.data() };
+          const json = stableStringify(remote);
+          if (json !== lastSyncedRef.current) {
+            lastSyncedRef.current = json;
+            setState(remote);
+          }
         }
-      } catch (e) {
-        if (active) setSyncError("No se pudo conectar con la nube. Tus cambios se están guardando solo en este dispositivo por ahora.");
-      } finally {
-        if (active) setCloudReady(true);
+        setCloudReady(true);
+      },
+      () => {
+        if (!active) return;
+        setSyncError("No se pudo conectar con la nube. Tus cambios se están guardando solo en este dispositivo por ahora.");
+        setCloudReady(true);
       }
-    })();
+    );
     return () => {
       active = false;
+      unsub();
     };
   }, [user.uid]);
 
@@ -192,10 +218,18 @@ function FinanzasApp({ user, onLogout }) {
       /* almacenamiento local no disponible, ignorar */
     }
     if (!cloudReady) return; // evita sobrescribir la nube con el estado vacío antes de que llegue la primera carga
+    const json = stableStringify(state);
+    if (json === lastSyncedRef.current) return; // ya está en la nube (p. ej. llegó desde WhatsApp)
+    dirtyRef.current = true;
     const timeout = setTimeout(() => {
-      setDoc(doc(db, "profiles", user.uid), state).catch(() => {
-        setSyncError("No se pudo guardar en la nube. Revisa tu conexión — tus datos siguen a salvo en este dispositivo.");
-      });
+      setDoc(doc(db, "profiles", user.uid), state)
+        .then(() => {
+          lastSyncedRef.current = json;
+          if (stableStringify(stateRef.current) === json) dirtyRef.current = false;
+        })
+        .catch(() => {
+          setSyncError("No se pudo guardar en la nube. Revisa tu conexión — tus datos siguen a salvo en este dispositivo.");
+        });
     }, 600);
     return () => clearTimeout(timeout);
   }, [state, cloudReady, user.uid]);
@@ -588,6 +622,8 @@ function FinanzasApp({ user, onLogout }) {
           {tab === "historico" && <AnnualSummary transactions={state.transactions} />}
 
           {tab === "datos" && (
+            <>
+            <WhatsAppLink user={user} />
             <DatosTab
               exportData={exportData}
               copyData={copyData}
@@ -600,6 +636,7 @@ function FinanzasApp({ user, onLogout }) {
               resetAll={resetAll}
               state={state}
             />
+            </>
           )}
         </main>
       </div>
