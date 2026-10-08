@@ -1,4 +1,5 @@
 import { MONTH_LABELS } from "./format.js";
+import { isCreditCharge } from "./debts.js";
 
 /**
  * @typedef {Object} Transaction
@@ -57,6 +58,10 @@ export function buildMonthlySummaries(transactions, year) {
       bucket.ingresos += amount;
     } else if (t.category === "ahorro") {
       bucket.ahorro += amount;
+    } else if (isCreditCharge(t)) {
+      // Consumo cargado a una tarjeta: el dinero aún no salió de tu cuenta. Se refleja en
+      // "gastos" cuando lo pagas (movimiento de categoría "deuda"); contarlo aquí también
+      // lo duplicaría. Sigue visible en el presupuesto por categoría y en el historial de la tarjeta.
     } else {
       bucket.gastos += amount;
     }
