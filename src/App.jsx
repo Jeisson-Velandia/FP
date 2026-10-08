@@ -520,7 +520,7 @@ function FinanzasApp({ user, onLogout }) {
         <div className="flex items-center gap-3 min-w-0">
           <Wallet size={22} style={{ color: "var(--brass)" }} className="shrink-0" />
           <div className="min-w-0">
-            <h1 className="font-display text-xl">Finanzas Personales</h1>
+            <h1 className="font-display text-xl">Mi Libro Mayor</h1>
             <p className="text-xs truncate" style={{ color: "var(--ink-dim)" }}>
               {syncError ? (
                 <span className="flex items-center gap-1" style={{ color: "var(--amber)" }}>
