@@ -25,6 +25,9 @@ jobs:
           cache: npm
       - run: npm install
       - run: npm run build
+        env:
+          # Opcional: variable del repositorio (Settings → Variables) con el número del bot, solo dígitos
+          VITE_WHATSAPP_BOT_NUMBER: ${{ vars.WHATSAPP_BOT_NUMBER }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
