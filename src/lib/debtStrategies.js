@@ -107,7 +107,8 @@ export function simulatePayoff(debts, extraPayment, strategy) {
  * @param {SimDebt[]} debts
  * @param {number} targetMonths
  * @param {Strategy} [strategy]
- * @returns {number|null} pesos por mes (redondeado hacia arriba a miles), o null si no hay deudas
+ * @returns {number|null} pesos por mes (redondeado hacia arriba a miles), o null si no hay deudas.
+ *   Nunca es menor que la suma de los pagos mínimos: son obligatorios.
  */
 export function requiredMonthlyBudget(debts, targetMonths, strategy = "avalanche") {
   const active = debts.filter((d) => Number(d.balance) > 0.01);
@@ -125,5 +126,5 @@ export function requiredMonthlyBudget(debts, targetMonths, strategy = "avalanche
     if (fits(mid)) hi = mid;
     else lo = mid;
   }
-  return Math.ceil(hi / 1000) * 1000;
+  return Math.max(Math.ceil(hi / 1000) * 1000, sumMin);
 }

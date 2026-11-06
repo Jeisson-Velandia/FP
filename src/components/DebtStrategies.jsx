@@ -52,6 +52,7 @@ export default function DebtStrategies({ activeDebts, extraPayment }) {
   const avalanche = useMemo(() => simulatePayoff(activeDebts, extra, "avalanche"), [activeDebts, extra]);
   const sumMin = activeDebts.reduce((s, d) => s + (Number(d.minPayment) || 0), 0);
   const plan = useMemo(() => TARGETS.map((t) => ({ months: t, budget: requiredMonthlyBudget(activeDebts, t) })), [activeDebts]);
+  const minsOnly = useMemo(() => simulatePayoff(activeDebts, 0, "avalanche"), [activeDebts]);
   const withoutMin = activeDebts.filter((d) => !(Number(d.minPayment) > 0));
 
   const feasible = snowball.feasible && avalanche.feasible;
@@ -118,7 +119,11 @@ export default function DebtStrategies({ activeDebts, extraPayment }) {
               <p className="text-xs" style={{ color: "var(--ink-dim)" }}>En {p.months} meses</p>
               <p className="font-mono-num text-lg font-semibold">{fmt(p.budget)}<span className="text-xs font-normal" style={{ color: "var(--ink-dim)" }}> /mes</span></p>
               <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
-                {p.budget > sumMin ? `${fmt(p.budget - sumMin)} sobre tus mínimos` : "con tus mínimos alcanza"}
+                {p.budget > sumMin
+                  ? `${fmt(p.budget - sumMin)} sobre tus mínimos`
+                  : minsOnly.feasible
+                    ? `con tus mínimos ya terminas en ${minsOnly.months} meses`
+                    : "con tus mínimos no alcanza"}
               </p>
             </div>
           ))}

@@ -41,4 +41,8 @@ assert.ok(simulatePayoff(D, need12, "avalanche").months <= 12);
 assert.equal(requiredMonthlyBudget([], 12), null);
 // 10) sin deudas
 assert.deepEqual(simulatePayoff([], 0, "snowball").months, 0);
+// 11) con mínimos altos, el presupuesto requerido nunca baja de los mínimos
+const M = D.map((d, i) => ({ ...d, minPayment: i ? 650000 : 600000 }));
+assert.equal(requiredMonthlyBudget(M, 36), 1250000);
+assert.ok(requiredMonthlyBudget(M, 3) > 1250000);
 console.log("ok", { m600: r.months, i600: Math.round(r.totalInterest), need12, need24 });
