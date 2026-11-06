@@ -10,11 +10,12 @@
 import { matchDebt } from "./messageParser.js";
 import { applyTxToDebts, reverseTxOnDebts, debtMetrics } from "./debts.js";
 import { monthBalance } from "./monthly.js";
+import { adviceReply } from "./advisor.js";
 import { fmt } from "./format.js";
 
 export const CATEGORY_LABEL = {
   vivienda: "Vivienda", comida: "Comida", transporte: "Transporte", entretenimiento: "Entretenimiento",
-  salud: "Salud", deuda: "Deuda", ahorro: "Ahorro", otros: "Otros", ingreso: "Ingreso",
+  salud: "Salud", deuda: "Deuda", ahorro: "Ahorro", intereses: "Intereses y comisiones", otros: "Otros", ingreso: "Ingreso",
 };
 
 /** Fuentes que cuentan como "registrado por texto" y se pueden deshacer. */
@@ -31,6 +32,7 @@ export function applyCommand(data, cmd, { today, newId, source }) {
   const transactions = data.transactions || [];
 
   if (cmd.kind === "balance") return { reply: balanceReply(data, today), data: null };
+  if (cmd.kind === "advice") return { reply: adviceReply(data, today), data: null };
 
   if (cmd.kind === "undo") {
     const last = transactions.find((t) => QUICK_SOURCES.includes(t.source));
@@ -108,6 +110,12 @@ function registerReply({ record, linked, applied, data, today }) {
         .reduce((s, t) => s + Number(t.amount), 0);
       lines.push(`🎯 Presupuesto ${label}: ${spent > budget ? "te pasaste por " + fmt(spent - budget) : "te quedan " + fmt(budget - spent)}`);
     }
+  }
+  if (record.chargeDebtId && record.category === "intereses") {
+    lines.push("ℹ️ Quedó como intereses/comisión: no cuenta como pago a tu deuda.");
+  } else if (record.chargeDebtId) {
+    const m = monthBalance(data, today.slice(0, 7));
+    if (m.consumosCredito > 0) lines.push(`💳 Consumos a crédito este mes: ${fmt(m.consumosCredito)}`);
   }
   lines.push(`📊 Te quedan *${fmt(b.balance)}* este mes${b.balance < 0 ? " ⚠️" : ""}`);
   return lines.join("\n");

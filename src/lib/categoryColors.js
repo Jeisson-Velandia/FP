@@ -6,7 +6,7 @@
  * entre sí. Este módulo no depende de React a propósito: es dato puro, reutilizable
  * también desde Node (por ejemplo, el futuro bot de WhatsApp) o desde pruebas unitarias.
  *
- * @typedef {"vivienda"|"comida"|"transporte"|"entretenimiento"|"salud"|"deuda"|"ahorro"|"otros"} CategoryId
+ * @typedef {"vivienda"|"comida"|"transporte"|"entretenimiento"|"salud"|"deuda"|"ahorro"|"intereses"|"otros"} CategoryId
  *
  * @typedef {Object} CategoryColorClasses
  * @property {string} bg      - fondo sólido, ej. para un punto de color o un ícono circular
@@ -114,6 +114,19 @@ export const CATEGORY_PALETTE = {
       text: "text-cyan-500",
       border: "border-cyan-500",
       ring: "ring-cyan-500",
+    },
+  },
+  intereses: {
+    id: "intereses",
+    label: "Intereses y comisiones",
+    hex: "#FB7185",
+    tw: "rose",
+    classes: {
+      bg: "bg-rose-400",
+      bgSoft: "bg-rose-400/15",
+      text: "text-rose-400",
+      border: "border-rose-400",
+      ring: "ring-rose-400",
     },
   },
   otros: {

@@ -10,6 +10,7 @@
  *   "35000 comida cena con davivienda"   → consumo a crédito (gasto + suma al saldo de esa tarjeta)
  *   "ingreso 1500000 freelance"          → ingreso
  *   "saldo" / "resumen"                  → consulta del balance del mes
+ *   "cómo voy" / "asesor" / "consejos"   → alertas y sugerencias del asesor
  *   "deshacer"                           → borra el último movimiento registrado por WhatsApp
  *   "vincular 123456"                    → asocia este número con la cuenta que generó el código
  *   "ayuda"                              → instrucciones
@@ -20,14 +21,15 @@
  * @typedef {{ kind: "link", code: string }} LinkCommand
  * @typedef {{ kind: "balance" }} BalanceCommand
  * @typedef {{ kind: "undo" }} UndoCommand
+ * @typedef {{ kind: "advice" }} AdviceCommand
  * @typedef {{ kind: "help" }} HelpCommand
  * @typedef {{ kind: "unknown", reason: string }} UnknownCommand
- * @typedef {RegisterCommand|LinkCommand|BalanceCommand|UndoCommand|HelpCommand|UnknownCommand} Command
+ * @typedef {RegisterCommand|LinkCommand|BalanceCommand|UndoCommand|AdviceCommand|HelpCommand|UnknownCommand} Command
  */
 
 /** Categorías válidas (mismos ids que la app). */
 export const CATEGORY_IDS = [
-  "vivienda", "comida", "transporte", "entretenimiento", "salud", "deuda", "ahorro", "otros",
+  "vivienda", "comida", "transporte", "entretenimiento", "salud", "deuda", "ahorro", "intereses", "otros",
 ];
 
 /** Sinónimos → id de categoría. Todo en minúsculas y sin tildes. */
@@ -39,6 +41,7 @@ const CATEGORY_ALIASES = {
   salud: "salud", medico: "salud", farmacia: "salud",
   deuda: "deuda", deudas: "deuda", pago: "deuda", cuota: "deuda",
   ahorro: "ahorro", ahorros: "ahorro",
+  intereses: "intereses", interes: "intereses", comision: "intereses", comisiones: "intereses",
   otros: "otros", otro: "otros",
 };
 
@@ -81,6 +84,7 @@ export function parseAmount(token) {
 const HELP_WORDS = new Set(["ayuda", "help", "hola", "menu", "?"]);
 const BALANCE_WORDS = new Set(["saldo", "resumen", "balance", "cuanto me queda"]);
 const UNDO_WORDS = new Set(["deshacer", "borrar", "anular", "undo"]);
+const ADVICE_WORDS = new Set(["como voy", "asesor", "asesoria", "consejo", "consejos", "sugerencias", "alertas", "analisis"]);
 
 /**
  * @param {string} text
@@ -93,6 +97,7 @@ export function parseMessage(text) {
   if (HELP_WORDS.has(clean)) return { kind: "help" };
   if (BALANCE_WORDS.has(clean)) return { kind: "balance" };
   if (UNDO_WORDS.has(clean)) return { kind: "undo" };
+  if (ADVICE_WORDS.has(clean)) return { kind: "advice" };
 
   const link = clean.match(/^vincular\s+(\d{4,10})$/);
   if (link) return { kind: "link", code: link[1] };

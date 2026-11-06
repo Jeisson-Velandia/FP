@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { BarChart3, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { fmt, thisYear, thisMonthIndex } from "../lib/format.js";
 import {
@@ -13,31 +13,50 @@ import { getCategoryHex } from "../lib/categoryColors.js";
 // repetidos aquí en hex literal porque Recharts no resuelve variables CSS en el atributo `fill`
 // de forma confiable — es la misma convención que ya usaba el gráfico de presupuesto original.
 const SERIES_COLORS = {
-  ingresos: "#4F9D69",
-  gastos: "#B5533C",
+  ingresos: "#34D399",
+  gastos: "#F87171",
+  balance: "#E7EAF3",
   ahorro: getCategoryHex("ahorro"),
 };
 
+/** $3.500.000 → "$3,5M", $450.000 → "$450k" (ejes de la gráfica). */
+const compact = (n) => {
+  const v = Number(n) || 0;
+  const sign = v < 0 ? "-" : "";
+  const a = Math.abs(v);
+  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(1).replace(".", ",").replace(",0", "")}M`;
+  if (a >= 1e3) return `${sign}$${Math.round(a / 1e3)}k`;
+  return `${sign}$${a}`;
+};
+
 /**
- * @param {{ transactions: import("../lib/annualSummary.js").Transaction[] }} props
+ * @param {{ transactions: import("../lib/annualSummary.js").Transaction[], monthlyIncomeTotal?: number }} props
  */
-export default function AnnualSummary({ transactions }) {
+export default function AnnualSummary({ transactions, monthlyIncomeTotal = 0 }) {
   const availableYears = useMemo(() => getAvailableYears(transactions), [transactions]);
   const [year, setYear] = useState(thisYear());
 
-  const months = useMemo(() => buildMonthlySummaries(transactions, year), [transactions, year]);
+  const months = useMemo(
+    () => buildMonthlySummaries(transactions, year, { fixedMonthlyIncome: monthlyIncomeTotal }),
+    [transactions, year, monthlyIncomeTotal]
+  );
   const yearTotals = useMemo(() => summarizeYear(months), [months]);
 
-  // Año en curso: solo mostramos hasta el mes actual (no tiene sentido listar meses futuros vacíos).
-  // Año pasado: mostramos los 12 meses completos, para ver el año cerrado entero.
+  // Solo se muestran los meses con actividad: desde el primer mes con datos hasta el mes actual (año en
+  // curso) o hasta el último mes con datos (años pasados). Así las barras no quedan diminutas entre
+  // meses vacíos cuando apenas empiezas a usar la app.
   const isCurrentYear = year === thisYear();
-  const visibleMonths = isCurrentYear ? months.slice(0, thisMonthIndex() + 1) : months;
+  const firstIdx = Math.max(0, months.findIndex((m) => m.hasData));
+  const lastWithData = months.reduce((last, m, i) => (m.hasData ? i : last), firstIdx);
+  const lastIdx = isCurrentYear ? Math.max(thisMonthIndex(), lastWithData) : lastWithData;
+  const visibleMonths = months.slice(firstIdx, lastIdx + 1);
 
-  const chartData = months.map((m) => ({
+  const chartData = visibleMonths.map((m) => ({
     name: m.monthLabel,
     Ingresos: Math.round(m.ingresos),
     Gastos: Math.round(m.gastos),
     Ahorro: Math.round(m.ahorro),
+    Balance: Math.round(m.balance),
   }));
 
   return (
@@ -60,29 +79,38 @@ export default function AnnualSummary({ transactions }) {
       </div>
 
       <div className="ledger-card p-5">
-        <h4 className="font-display text-base mb-4">Ingresos vs. Gastos vs. Ahorro por mes</h4>
+        <h4 className="font-display text-base mb-4">Ingresos, gastos, ahorro y balance por mes</h4>
         {yearTotals.mesesConDatos === 0 ? (
           <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
             Todavía no hay movimientos registrados en {year}.
           </p>
         ) : (
-          <div style={{ width: "100%", height: 300 }}>
+          <>
+          <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)" />
-                <XAxis dataKey="name" tick={{ fill: "var(--ink-dim)", fontSize: 11 }} />
-                <YAxis tick={{ fill: "var(--ink-dim)", fontSize: 11 }} />
+              <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)" vertical={false} />
+                <XAxis dataKey="name" tick={{ fill: "var(--ink-dim)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "var(--ink-dim)", fontSize: 11 }} tickFormatter={compact} width={52} axisLine={false} tickLine={false} />
                 <Tooltip
+                  cursor={{ fill: "rgba(148,163,184,0.08)" }}
                   contentStyle={{ background: "#1A2234", border: "1px solid rgba(148,163,184,0.2)", borderRadius: 10, color: "#E7EAF3" }}
                   formatter={(value) => fmt(/** @type {number} */ (value))}
                 />
                 <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="Ingresos" fill={SERIES_COLORS.ingresos} radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Gastos" fill={SERIES_COLORS.gastos} radius={[2, 2, 0, 0]} />
-                <Bar dataKey="Ahorro" fill={SERIES_COLORS.ahorro} radius={[2, 2, 0, 0]} />
-              </BarChart>
+                <Bar dataKey="Ingresos" fill={SERIES_COLORS.ingresos} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                <Bar dataKey="Gastos" fill={SERIES_COLORS.gastos} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                <Bar dataKey="Ahorro" fill={SERIES_COLORS.ahorro} radius={[4, 4, 0, 0]} maxBarSize={42} />
+                <Line type="linear" dataKey="Balance" stroke={SERIES_COLORS.balance} strokeWidth={2} dot={{ r: 3, fill: SERIES_COLORS.balance }} />
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
+          {monthlyIncomeTotal > 0 && (
+            <p className="text-xs mt-3" style={{ color: "var(--ink-dim)" }}>
+              Los ingresos fijos de Configuración ({fmt(monthlyIncomeTotal)}/mes) se cuentan en cada mes desde tu primer movimiento, igual que en el Tablero. Si además registras tu sueldo como movimiento de ingreso, se contará dos veces: usa uno u otro.
+            </p>
+          )}
+          </>
         )}
       </div>
 
