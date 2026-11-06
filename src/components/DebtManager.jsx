@@ -194,7 +194,7 @@ function DebtCard({ debt, transactions, categories, onAddCharge }) {
           <div className="min-w-0">
             <h4 className="font-display text-base truncate">{debt.name}</h4>
             <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
-              {isCard ? "Tarjeta de crédito" : "Préstamo"} · {debt.rate}% anual · mín. {fmt(debt.minPayment)}
+              {isCard ? "Tarjeta de crédito" : "Préstamo"} · {debt.rate}% E.A. · mín. {fmt(debt.minPayment)}
             </p>
           </div>
         </div>

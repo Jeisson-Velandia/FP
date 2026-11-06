@@ -1,5 +1,6 @@
 import { MONTH_LABELS } from "./format.js";
 import { isCreditCharge } from "./debts.js";
+import { thisMonthKey } from "./format.js";
 
 /**
  * @typedef {Object} Transaction
@@ -30,11 +31,16 @@ import { isCreditCharge } from "./debts.js";
  * sale de la cuenta corriente), pero se reporta en su propia serie para que el usuario vea
  * cuánto destinó a ahorrar cada mes.
  *
+ * Ingresos fijos: los que se configuran en la pestaña Configuración (sueldo, etc.) no son transacciones,
+ * pero el tablero SÍ los cuenta cada mes. Para que el histórico cuadre con el tablero, se suman a
+ * cada mes desde el primer mes con movimientos hasta el mes actual.
+ *
  * @param {Transaction[]} transactions
  * @param {number} year - ej. 2026
+ * @param {{ fixedMonthlyIncome?: number, currentMonthKey?: string }} [opts]
  * @returns {MonthlySummary[]} longitud 12, en orden enero → diciembre
  */
-export function buildMonthlySummaries(transactions, year) {
+export function buildMonthlySummaries(transactions, year, opts = {}) {
   const months = Array.from({ length: 12 }, (_, i) => ({
     monthIndex: i,
     monthLabel: MONTH_LABELS[i],
@@ -44,6 +50,21 @@ export function buildMonthlySummaries(transactions, year) {
     balance: 0,
     hasData: false,
   }));
+
+  const fixed = Number(opts.fixedMonthlyIncome) || 0;
+  if (fixed > 0) {
+    const nowKey = opts.currentMonthKey || thisMonthKey();
+    const firstKey = transactions.reduce((min, t) => (t?.date && (!min || t.date.slice(0, 7) < min) ? t.date.slice(0, 7) : min), "");
+    if (firstKey) {
+      months.forEach((m, i) => {
+        const key = `${year}-${String(i + 1).padStart(2, "0")}`;
+        if (key >= firstKey && key <= nowKey) {
+          m.ingresos += fixed;
+          m.hasData = true;
+        }
+      });
+    }
+  }
 
   for (const t of transactions) {
     if (!t?.date || t.date.slice(0, 4) !== String(year)) continue;

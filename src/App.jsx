@@ -12,6 +12,7 @@ import AnnualSummary from "./components/AnnualSummary.jsx";
 import SavingsGoalsModule from "./components/SavingsGoals.jsx";
 import ChatBox from "./components/ChatBox.jsx";
 import WhatsAppLink from "./components/WhatsAppLink.jsx";
+import DebtStrategies from "./components/DebtStrategies.jsx";
 import DebtManager from "./components/DebtManager.jsx";
 import { applyTxToDebts, reverseTxOnDebts, isCreditCharge } from "./lib/debts.js";
 import {
@@ -65,42 +66,6 @@ const emptyState = { incomes: [], debts: [], budgets: {}, transactions: [], savi
 const STORAGE_KEY = "finanzas-personales-v1";
 
 /* ------------------------------- debt engine ------------------------------- */
-
-function simulateDebts(debts, extraPayment, strategy) {
-  const working = debts.map((d) => ({ ...d }));
-  if (working.length === 0) return { months: 0, totalInterest: 0, order: [] };
-  const sortFn =
-    strategy === "snowball" ? (a, b) => a.balance - b.balance : (a, b) => b.rate - a.rate;
-  let months = 0;
-  let totalInterest = 0;
-  const paidOrder = [];
-  const maxMonths = 720;
-  while (working.some((d) => d.balance > 0.01) && months < maxMonths) {
-    months++;
-    working.forEach((d) => {
-      if (d.balance > 0) {
-        const interest = (d.balance * (d.rate / 100)) / 12;
-        totalInterest += interest;
-        d.balance += interest;
-      }
-    });
-    working.forEach((d) => {
-      if (d.balance > 0) d.balance -= Math.min(d.minPayment, d.balance);
-    });
-    let extra = extraPayment;
-    const targets = working.filter((d) => d.balance > 0).sort(sortFn);
-    for (const d of targets) {
-      if (extra <= 0) break;
-      const pay = Math.min(extra, d.balance);
-      d.balance -= pay;
-      extra -= pay;
-    }
-    working.forEach((d) => {
-      if (d.balance <= 0.01 && !paidOrder.includes(d.id)) paidOrder.push(d.id);
-    });
-  }
-  return { months, totalInterest, order: paidOrder };
-}
 
 /* --------------------------------- pieces ---------------------------------- */
 
@@ -310,16 +275,6 @@ function FinanzasApp({ user, onLogout }) {
   const activeDebts = useMemo(() => state.debts.filter((d) => Number(d.balance) > 0.01), [state.debts]);
   const totalDebt = useMemo(() => state.debts.reduce((s, d) => s + Number(d.balance), 0), [state.debts]);
 
-  const snowball = useMemo(() => simulateDebts(activeDebts, Number(extraPayment) || 0, "snowball"), [activeDebts, extraPayment]);
-  const avalanche = useMemo(() => simulateDebts(activeDebts, Number(extraPayment) || 0, "avalanche"), [activeDebts, extraPayment]);
-  const recommendation = useMemo(() => {
-    if (activeDebts.length === 0) return null;
-    const diff = snowball.totalInterest - avalanche.totalInterest;
-    if (diff > Math.max(50, avalanche.totalInterest * 0.05)) {
-      return { key: "avalancha", reason: `Ahorras aprox. ${fmt(diff)} en intereses frente al método bola de nieve.` };
-    }
-    return { key: "bola de nieve", reason: "La diferencia de interés entre métodos es pequeña; la bola de nieve te da victorias rápidas que ayudan a mantener el hábito." };
-  }, [activeDebts, snowball, avalanche]);
 
   /* --------------------------------- actions --------------------------------- */
 
@@ -611,9 +566,6 @@ function FinanzasApp({ user, onLogout }) {
               onAddCharge={addChargeToDebt}
               extraPayment={extraPayment}
               setExtraPayment={setExtraPayment}
-              snowball={snowball}
-              avalanche={avalanche}
-              recommendation={recommendation}
               totalDebt={totalDebt}
             />
           )}
@@ -627,7 +579,7 @@ function FinanzasApp({ user, onLogout }) {
             />
           )}
 
-          {tab === "historico" && <AnnualSummary transactions={state.transactions} />}
+          {tab === "historico" && <AnnualSummary transactions={state.transactions} monthlyIncomeTotal={monthlyIncomeTotal} />}
 
           {tab === "datos" && (
             <>
@@ -899,7 +851,7 @@ function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, 
           <Field label="Saldo total">
             <input type="number" placeholder="0" value={debtForm.balance} onChange={(e) => setDebtForm({ ...debtForm, balance: e.target.value })} />
           </Field>
-          <Field label="Tasa interés anual %">
+          <Field label="Tasa efectiva anual (E.A.) %">
             <input type="number" placeholder="0" value={debtForm.rate} onChange={(e) => setDebtForm({ ...debtForm, rate: e.target.value })} />
           </Field>
           <Field label="Pago mínimo">
@@ -927,7 +879,7 @@ function ConfigTab({ state, incomeForm, setIncomeForm, addIncome, removeIncome, 
               <span>
                 {d.name}{" "}
                 <span style={{ color: "var(--ink-dim)" }}>
-                  · {d.kind === "tarjeta" ? `tarjeta${d.limit ? ` · cupo ${fmt(d.limit)}` : ""}` : "préstamo"} · {d.rate}% anual · mín. {fmt(d.minPayment)}
+                  · {d.kind === "tarjeta" ? `tarjeta${d.limit ? ` · cupo ${fmt(d.limit)}` : ""}` : "préstamo"} · {d.rate}% E.A. · mín. {fmt(d.minPayment)}
                 </span>
               </span>
               <div className="flex items-center gap-3">
@@ -1135,7 +1087,7 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
 
 /* -------------------------------- deudas tab --------------------------------- */
 
-function DeudasTab({ debts, activeDebts, transactions, onAddCharge, extraPayment, setExtraPayment, snowball, avalanche, recommendation, totalDebt }) {
+function DeudasTab({ debts, activeDebts, transactions, onAddCharge, extraPayment, setExtraPayment, totalDebt }) {
   return (
     <div className="space-y-6">
       <div className="ledger-card p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1168,24 +1120,7 @@ function DeudasTab({ debts, activeDebts, transactions, onAddCharge, extraPayment
             </div>
           ) : (
             <>
-              {recommendation && (
-                <div className="ledger-card p-5" style={{ borderColor: "var(--brass)" }}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Mountain size={18} style={{ color: "var(--brass)" }} />
-                    <h3 className="font-display text-base">
-                      Recomendación: método <span style={{ color: "var(--brass)" }}>{recommendation.key}</span>
-                    </h3>
-                  </div>
-                  <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
-                    {recommendation.reason}
-                  </p>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <StrategyCard icon={Snowflake} title="Bola de nieve" subtitle="Paga primero el saldo más pequeño" result={snowball} debts={activeDebts} order="snowball" />
-                <StrategyCard icon={Mountain} title="Avalancha" subtitle="Paga primero la tasa más alta" result={avalanche} debts={activeDebts} order="avalanche" />
-              </div>
+              <DebtStrategies activeDebts={activeDebts} extraPayment={extraPayment} />
             </>
           )}
         </>
@@ -1194,46 +1129,6 @@ function DeudasTab({ debts, activeDebts, transactions, onAddCharge, extraPayment
   );
 }
 
-function StrategyCard({ icon: Icon, title, subtitle, result, debts, order }) {
-  const sorted = [...debts].sort(order === "snowball" ? (a, b) => a.balance - b.balance : (a, b) => b.rate - a.rate);
-  return (
-    <div className="ledger-card p-5">
-      <div className="flex items-center gap-2 mb-1">
-        <Icon size={17} style={{ color: "var(--brass)" }} />
-        <h4 className="font-display text-base">{title}</h4>
-      </div>
-      <p className="text-xs mb-4" style={{ color: "var(--ink-dim)" }}>
-        {subtitle}
-      </p>
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div>
-          <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
-            Tiempo estimado
-          </p>
-          <p className="font-mono-num text-lg font-semibold">{result.months} meses</p>
-        </div>
-        <div>
-          <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
-            Interés total pagado
-          </p>
-          <p className="font-mono-num text-lg font-semibold" style={{ color: "var(--red)" }}>
-            {fmt(result.totalInterest)}
-          </p>
-        </div>
-      </div>
-      <p className="text-xs mb-2" style={{ color: "var(--ink-dim)" }}>
-        Orden de pago sugerido
-      </p>
-      <ol className="text-sm space-y-1 list-decimal list-inside">
-        {sorted.map((d) => (
-          <li key={d.id}>
-            {d.name} <span style={{ color: "var(--ink-dim)" }}>({fmt(d.balance)} · {d.rate}%)</span>
-          </li>
-        ))}
-      </ol>
-    </div>
-  );
-}
 
 /* --------------------------------- datos tab --------------------------------- */
 
