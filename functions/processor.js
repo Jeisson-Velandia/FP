@@ -27,7 +27,7 @@ export const HELP_TEXT = [
   "• `35000 comida cena con davivienda` (consumo a crédito)",
   "• `ingreso 1500000 freelance`",
   "",
-  "Otros comandos: `saldo`, `deshacer`, `ayuda`.",
+  "Otros comandos: `saldo`, `como voy` (consejos del asesor), `deshacer`, `ayuda`.",
   "Para conectar tu cuenta: en la app, pestaña *Datos* → WhatsApp, y envía `vincular 123456` con tu código.",
 ].join("\n");
 

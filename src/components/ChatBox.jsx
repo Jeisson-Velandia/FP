@@ -4,10 +4,10 @@ import { parseMessage } from "../lib/messageParser.js";
 import { applyCommand } from "../lib/quickEntry.js";
 import { todayStr } from "../lib/format.js";
 
-const EXAMPLES = ["50000 comida almuerzo", "120000 transporte gasolina", "200000 deuda pago tarjeta", "saldo"];
+const EXAMPLES = ["50000 comida almuerzo", "120000 transporte gasolina", "200000 deuda pago tarjeta", "saldo", "como voy"];
 
 const HELP =
-  "Escríbeme tus movimientos así:\n• `50000 comida almuerzo`\n• `120000 transporte gasolina`\n• `200000 deuda pago tarjeta`\n• `35000 comida cena con davivienda` (consumo a tarjeta)\n• `ingreso 1500000 freelance`\nTambién: `saldo` y `deshacer`.";
+  "Escríbeme tus movimientos así:\n• `50000 comida almuerzo`\n• `120000 transporte gasolina`\n• `200000 deuda pago tarjeta`\n• `35000 comida cena con davivienda` (consumo a tarjeta)\n• `ingreso 1500000 freelance`\nTambién: `saldo`, `como voy` (consejos del asesor) y `deshacer`.";
 
 const GREETING = "👋 Hola, registra un gasto escribiéndolo como lo dirías. Por ejemplo: `50000 comida almuerzo`.";
 

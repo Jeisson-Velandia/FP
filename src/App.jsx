@@ -10,6 +10,7 @@ import { fmt, todayStr, thisMonthKey, thisYear, thisMonthIndex } from "./lib/for
 import { buildMonthlySummaries } from "./lib/annualSummary.js";
 import AnnualSummary from "./components/AnnualSummary.jsx";
 import SavingsGoalsModule from "./components/SavingsGoals.jsx";
+import Advisor, { AdvisorPreview } from "./components/Advisor.jsx";
 import ChatBox from "./components/ChatBox.jsx";
 import WhatsAppLink from "./components/WhatsAppLink.jsx";
 import DebtStrategies from "./components/DebtStrategies.jsx";
@@ -20,7 +21,7 @@ import {
   Car, Film, HeartPulse, MoreHorizontal, PlusCircle, Trash2, Pencil, X,
   Download, Upload, TrendingUp, TrendingDown, Wallet, AlertTriangle,
   CheckCircle2, Snowflake, RotateCcw, Copy, Check, CreditCard, LogOut, CloudOff,
-  PiggyBank, BarChart3,
+  PiggyBank, BarChart3, Compass, Percent,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -39,6 +40,7 @@ const CATEGORIES = [
   { id: "salud", label: "Salud", icon: HeartPulse, color: getCategoryColor("salud").hex },
   { id: "deuda", label: "Deuda", icon: CreditCard, color: getCategoryColor("deuda").hex },
   { id: "ahorro", label: "Ahorro", icon: PiggyBank, color: getCategoryColor("ahorro").hex },
+  { id: "intereses", label: "Intereses y comisiones", icon: Percent, color: getCategoryColor("intereses").hex },
   { id: "otros", label: "Otros", icon: MoreHorizontal, color: getCategoryColor("otros").hex },
 ];
 const catById = (id) => CATEGORIES.find((c) => c.id === id) || CATEGORIES[CATEGORIES.length - 1];
@@ -62,7 +64,7 @@ const EMPTY_TX_FORM = () => ({ id: null, type: "gasto", amount: "", category: "c
 // Categorías en las que se puede consumir a crédito: un pago a deuda o un ahorro no se "cargan" a una tarjeta.
 const CHARGEABLE_CATEGORIES = CATEGORIES.filter((c) => c.id !== "deuda" && c.id !== "ahorro");
 
-const emptyState = { incomes: [], debts: [], budgets: {}, transactions: [], savingsGoals: { monthly: 0, annual: 0 } };
+const emptyState = { incomes: [], debts: [], budgets: {}, transactions: [], savingsGoals: { monthly: 0, annual: 0 }, advisorDismissed: [] };
 const STORAGE_KEY = "finanzas-personales-v1";
 
 /* ------------------------------- debt engine ------------------------------- */
@@ -246,6 +248,8 @@ function FinanzasApp({ user, onLogout }) {
     () => buildMonthlySummaries(state.transactions, thisYear()),
     [state.transactions]
   );
+  const dismissAdvice = (id) => setState((s) => ({ ...s, advisorDismissed: [...new Set([...(s.advisorDismissed || []), id])] }));
+  const restoreAdvice = () => setState((s) => ({ ...s, advisorDismissed: [] }));
   const setSavingsGoals = (goals) => setState((s) => ({ ...s, savingsGoals: goals }));
 
   const categorySpend = useMemo(() => {
@@ -455,12 +459,13 @@ function FinanzasApp({ user, onLogout }) {
     if (confirm("¿Borrar todos los datos? Esta acción no se puede deshacer.")) setState(emptyState);
   };
 
-  const PRIMARY_TABS = ["dashboard", "movimientos", "deudas", "ahorro"];
+  const PRIMARY_TABS = ["dashboard", "movimientos", "deudas", "asesor"];
   const NAV = [
     { id: "dashboard", label: "Tablero", short: "Inicio", icon: LayoutDashboard },
     { id: "config", label: "Configuración", icon: Settings2 },
     { id: "movimientos", label: "Movimientos", short: "Movim.", icon: ListChecks },
     { id: "deudas", label: "Deudas", icon: CreditCard },
+    { id: "asesor", label: "Asesor", icon: Compass },
     { id: "ahorro", label: "Ahorro", icon: PiggyBank },
     { id: "historico", label: "Histórico", icon: BarChart3 },
     { id: "datos", label: "Datos", icon: Save },
@@ -517,6 +522,8 @@ function FinanzasApp({ user, onLogout }) {
         {/* Main content - extra bottom padding on mobile so the bottom bar never overlaps content */}
         <main className="flex-1 p-5 md:p-8 space-y-6 max-w-6xl pb-28 md:pb-8 min-w-0">
           {(tab === "dashboard" || tab === "movimientos") && <ChatBox data={state} onApply={applyQuick} compact={tab === "movimientos"} />}
+          {tab === "dashboard" && <AdvisorPreview data={state} onOpen={() => setTab("asesor")} />}
+          {tab === "asesor" && <Advisor data={state} onDismiss={dismissAdvice} onRestore={restoreAdvice} onGo={setTab} />}
           {tab === "dashboard" && (
             <DashboardTab
               ingresoMes={ingresoMes}
