@@ -282,15 +282,26 @@ export function analyze(data, today, opts = {}) {
       });
     }
   }
-  // Tasa real cobrada vs. tasa registrada
+  // Tasa real cobrada vs. tasa registrada. Una tasa mensual por encima de ~3,5% (≈50% E.A.) supera
+  // cualquier tope legal: casi seguro hay cargos duplicados o de varios meses, no un cobro abusivo.
   for (const d of active) {
-    const interest = txs
-      .filter((t) => isCreditCharge(t) && t.chargeDebtId === d.id && /\binteres/.test(normalize(t.description)) && daysBetween(t.date, today) <= 35 && daysBetween(t.date, today) >= 0)
-      .reduce((s, t) => s + amountOf(t), 0);
+    const charges = txs.filter(
+      (t) => isCreditCharge(t) && t.chargeDebtId === d.id && /\binteres/.test(normalize(t.description)) && daysBetween(t.date, today) <= 35 && daysBetween(t.date, today) >= 0
+    );
+    const interest = charges.reduce((s, t) => s + amountOf(t), 0);
     if (interest > 0 && Number(d.balance) > 0) {
       const monthly = interest / Number(d.balance);
       const ea = Math.pow(1 + monthly, 12) - 1;
-      if (ea > ((Number(d.rate) || 0) / 100) * 1.3 + 0.02) {
+      const expected = Math.round((Number(d.balance) * (Math.pow(1 + (Number(d.rate) || 0) / 100, 1 / 12) - 1)) / 1000) * 1000;
+      if (monthly > 0.035) {
+        add({
+          key: `rate-check:${d.id}`, severity: "info",
+          title: `Revisa los intereses registrados de ${d.name}`,
+          detail: `Tienes ${charges.length} cargo${charges.length > 1 ? "s" : ""} de intereses por ${fmt(interest)} en los últimos 35 días, pero con tu saldo y tu tasa (${d.rate}% E.A.) lo normal es ~${fmt(expected)} al mes.`,
+          tip: "Probablemente hay uno duplicado o de varios meses. En Movimientos busca \"interés\" y borra o corrige los repetidos; así tu presupuesto y tu deuda quedan bien.",
+          action: { tab: "movimientos", label: "Ir a Movimientos" },
+        });
+      } else if (ea > ((Number(d.rate) || 0) / 100) * 1.3 + 0.02) {
         add({
           key: `rate:${d.id}`, severity: "media",
           title: `${d.name} te cobra más de lo que registraste`,
