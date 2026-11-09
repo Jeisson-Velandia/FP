@@ -15,13 +15,14 @@ import ChatBox from "./components/ChatBox.jsx";
 import WhatsAppLink from "./components/WhatsAppLink.jsx";
 import DebtStrategies from "./components/DebtStrategies.jsx";
 import DebtManager from "./components/DebtManager.jsx";
+import { normalize } from "./lib/messageParser.js";
 import { applyTxToDebts, reverseTxOnDebts, isCreditCharge } from "./lib/debts.js";
 import {
   LayoutDashboard, Settings2, ListChecks, Mountain, Save, Home, Utensils,
   Car, Film, HeartPulse, MoreHorizontal, PlusCircle, Trash2, Pencil, X,
   Download, Upload, TrendingUp, TrendingDown, Wallet, AlertTriangle,
   CheckCircle2, Snowflake, RotateCcw, Copy, Check, CreditCard, LogOut, CloudOff,
-  PiggyBank, BarChart3, Compass, Percent,
+  PiggyBank, BarChart3, Compass, Percent, Search,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
@@ -933,6 +934,22 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
   const chargeAfter = chargeDebt ? Number(chargeDebt.balance) + (Number(txForm.amount) || 0) : 0;
   const chargeOverLimit = chargeDebt && Number(chargeDebt.limit) > 0 && chargeAfter > Number(chargeDebt.limit);
   const debtById = (id) => debts.find((d) => d.id === id);
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState("todas");
+  // Busca por texto (descripción, categoría, deuda, fecha o monto) y filtra por categoría.
+  const filtered = useMemo(() => {
+    const words = normalize(query).split(" ").filter(Boolean);
+    return transactions.filter((t) => {
+      if (catFilter === "ingreso" ? t.type !== "ingreso" : catFilter !== "todas" && t.category !== catFilter) return false;
+      if (!words.length) return true;
+      const hay = normalize(
+        [t.description, t.type === "ingreso" ? "ingreso" : catById(t.category).label, debtById(t.debtId || t.chargeDebtId)?.name, t.date, t.amount, fmt(t.amount)].join(" ")
+      );
+      return words.every((w) => hay.includes(w));
+    });
+  }, [transactions, query, catFilter, debts]);
+  const filtering = query.trim() !== "" || catFilter !== "todas";
+  const filteredTotal = filtered.reduce((sum, t) => sum + (t.type === "ingreso" ? -Number(t.amount) : Number(t.amount)), 0);
   return (
     <div className="space-y-6">
       <div className="ledger-card p-5">
@@ -1028,7 +1045,39 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
       </div>
 
       <div className="ledger-card p-5">
-        <h3 className="font-display text-base mb-4">Últimos movimientos</h3>
+        <h3 className="font-display text-base mb-3">Movimientos</h3>
+        {transactions.length > 0 && (
+          <div className="mb-4 space-y-2">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="relative flex-1">
+                <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--ink-dim)" }} />
+                <input
+                  type="search"
+                  placeholder="Buscar: interés, claude, 50000, octubre…"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full"
+                  style={{ paddingLeft: "2.25rem" }}
+                  aria-label="Buscar movimientos"
+                />
+              </div>
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} aria-label="Filtrar por categoría">
+                <option value="todas">Todas las categorías</option>
+                <option value="ingreso">Ingresos</option>
+                {CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            {filtering && (
+              <p className="text-xs" style={{ color: "var(--ink-dim)" }}>
+                {filtered.length} de {transactions.length} movimientos · suma {fmt(Math.abs(filteredTotal))}
+                {filteredTotal < 0 ? " (ingresos)" : ""}{" "}
+                <button className="underline" onClick={() => { setQuery(""); setCatFilter("todas"); }}>Limpiar</button>
+              </p>
+            )}
+          </div>
+        )}
         {transactions.length === 0 ? (
           <p className="text-sm" style={{ color: "var(--ink-dim)" }}>
             Aún no has registrado movimientos.
@@ -1046,7 +1095,10 @@ function MovimientosTab({ txForm, setTxForm, submitTx, editTx, removeTx, transac
                 </tr>
               </thead>
               <tbody>
-                {transactions.map((t) => {
+                {filtered.length === 0 && (
+                  <tr><td colSpan={5} className="py-4 text-center" style={{ color: "var(--ink-dim)" }}>Ningún movimiento coincide con tu búsqueda.</td></tr>
+                )}
+                {filtered.map((t) => {
                   const c = t.type === "ingreso" ? null : catById(t.category);
                   return (
                     <tr key={t.id} className="border-b hairline">
