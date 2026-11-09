@@ -46,3 +46,19 @@ const M = D.map((d, i) => ({ ...d, minPayment: i ? 650000 : 600000 }));
 assert.equal(requiredMonthlyBudget(M, 36), 1250000);
 assert.ok(requiredMonthlyBudget(M, 3) > 1250000);
 console.log("ok", { m600: r.months, i600: Math.round(r.totalInterest), need12, need24 });
+
+// 12: con 2 deudas y sin dinero extra ambos métodos coinciden; con extra, la avalancha ahorra intereses
+{
+  const d = [
+    { id: "t", name: "Tarjeta", balance: 4453397, rate: 27, minPayment: 600000 },
+    { id: "a", name: "Addi", balance: 3527602, rate: 24.9, minPayment: 887147 },
+  ];
+  const s0 = simulatePayoff(d, 0, "snowball");
+  const a0 = simulatePayoff(d, 0, "avalanche");
+  assert.equal(Math.round(s0.totalInterest), Math.round(a0.totalInterest));
+  const s1 = simulatePayoff(d, 200000, "snowball");
+  const a1 = simulatePayoff(d, 200000, "avalanche");
+  assert.ok(a1.totalInterest < s1.totalInterest);
+  assert.notEqual(s1.payoff[0].month, a1.payoff[0].month);
+  console.log("ok 12: métodos coinciden sin extra y difieren con extra");
+}
