@@ -63,7 +63,7 @@ test("intereses mal categorizados se detectan", () => {
 
 test("tasa cobrada mayor a la registrada se señala", () => {
   const d = base();
-  d.transactions = [{ id: "x", type: "gasto", category: "intereses", amount: 160000, date: "2026-11-02", chargeDebtId: "d2", debtDelta: 160000, description: "Intereses Addi" }];
+  d.transactions = [{ id: "x", type: "gasto", category: "intereses", amount: 110000, date: "2026-11-02", chargeDebtId: "d2", debtDelta: 110000, description: "Intereses Addi" }];
   assert.ok(keys(analyze(d, TODAY)).includes("rate:d2"));
 });
 
@@ -101,4 +101,16 @@ test("chat: 'como voy' devuelve consejos sin modificar datos; 'intereses' se rec
   assert.match(adviceReply(base(), TODAY), /Asesor/);
   const c = parseMessage("40000 intereses tarjeta");
   assert.equal(c.category, "intereses");
+});
+
+test("intereses imposibles (varios meses/duplicados) no acusan al banco: piden revisar", () => {
+  const d = base();
+  d.transactions = [
+    { id: "a", type: "gasto", category: "intereses", amount: 90000, date: "2026-11-02", chargeDebtId: "d1", debtDelta: 90000, description: "Intereses tarjeta" },
+    { id: "b", type: "gasto", category: "intereses", amount: 90000, date: "2026-11-02", chargeDebtId: "d1", debtDelta: 90000, description: "Intereses tarjeta" },
+    { id: "c", type: "gasto", category: "intereses", amount: 90000, date: "2026-11-03", chargeDebtId: "d1", debtDelta: 90000, description: "Intereses tarjeta" },
+  ];
+  const k = keys(analyze(d, TODAY));
+  assert.ok(k.includes("rate-check:d1"));
+  assert.ok(!k.includes("rate:d1"));
 });
